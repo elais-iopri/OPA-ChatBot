@@ -5,8 +5,8 @@ import streamlit as st
 import gspread
 import time
 import pytz
-import uuid
 import random
+from uuid import uuid4
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 from langchain_core.runnables import (
@@ -45,6 +45,9 @@ load_dotenv()
 start_counter = time.perf_counter()
 
 # Setup a session state to hold up all the old messages
+# Setting up session id
+st.session_state.session_id = str(uuid4()) 
+
 if 'messages_product_knowledge' not in st.session_state:
     st.session_state.messages_product_knowledge = []
 
@@ -119,6 +122,45 @@ def remove_lucene_chars_cust(text: str) -> str:
             text = text.replace(char, " ")
     
     return text.strip()
+
+@st.cache_resource
+def connect_to_google_sheets():
+    # Define the scope
+    scope = [
+        "https://spreadsheets.google.com/feeds",
+        "https://www.googleapis.com/auth/drive"
+    ]
+    # Authenticate credentials
+    credentials_dict = st.secrets["gspread_credential"]
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(credentials_dict, scope)
+    client = gspread.authorize(creds)
+    return client
+
+# Save feedback to Google Sheets
+def save_feedback_to_google_sheets(name,sesssion_id, bidang, rating, feedback, chat_message):
+    # Connect to Google Sheets
+    client = connect_to_google_sheets()
+    sheet = client.open_by_url("https://docs.google.com/spreadsheets/d/17nV0tRr0sQLJlTD3BopuZFybSjL6R2C8kCCNYYzxdyg/edit?usp=sharing").sheet1# Open the Google Sheet by name
+    
+    chats = []
+    separator = "\n---\n"
+
+    if len(chat_message) <= 1:
+        conversation = rf""
+    else:
+        for chat in chat_message[1:]:
+            role = chat["role"]
+            content = chat["content"]
+            chats.append(
+                f"{role}:{content}"
+            )
+
+        conversation = f"""
+{separator.join([_chat for _chat in chats])}
+"""
+    # print(conversation)
+    # Append the feedback
+    sheet.append_row([datetime.now(pytz.timezone("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M:%S"), sesssion_id, name, bidang, rating, feedback, conversation])
 
 
 # Load llm model using Groq
@@ -340,7 +382,43 @@ def stream_response(response, delay=0.02):
         yield res
         time.sleep(delay)
 
-st.header("(OPA) - Oil Palm Assistant", divider="gray")
+@st.dialog("Berikan Feedback")
+def send_feedback():
+    with st.form(key="feedback_input", enter_to_submit=False, clear_on_submit=False):
+        name = st.text_input("Nama")
+        bidang = st.text_input("Bidang")
+        feedback = st.text_area("Feedback")
+
+        rating = [1, 2, 3, 4, 5]
+        selected_rating = st.feedback(options="stars")
+
+        # print("INI FEEDBACK: ", feedback)
+        if st.form_submit_button("Submit"):
+            # Save data to Google Sheets
+            if selected_rating is not None:
+                # sesssion_id, name, bidang, rating, feedback, conversation
+                save_feedback_to_google_sheets(st.session_state.session_id, name, bidang, rating[selected_rating], feedback, st.session_state.messages_product_knowledge)
+                st.success("Terimakasih atas umpan balik anda!")
+            else:
+                st.error("Tolong berikan rating 🙏")
+            
+
+with st.expander("OPA - Pakar Sawit", icon=":material/priority_high:", expanded=True):
+    st.markdown(body=
+"""
+PAKAR SAWIT adalah asisten virtual yang akan membantu anda terkait kultur kelapa sawit.
+
+**Aplikasi** ini sedang dalam pengembangan dan memerlukan **Feedback** dari pengguna.
+
+Silahkan coba untuk menanyakan sesuatu seputar kultur kelapa sawit. Setelah itu, mohon untuk mengisi *Feedback Form* dibawah ini.
+"""
+)
+
+    if st.button("Feedback Form", type="primary"):
+        send_feedback()
+
+st.image(image="./assets/Logo-RPN.png", width=240)
+st.header("(OPA) - Pakar Sawit", divider="gray")
 
 # Displaying all historical messages
 for message in st.session_state.messages_product_knowledge:
