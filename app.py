@@ -19,16 +19,14 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.prompts.prompt import PromptTemplate
-from langchain_community.vectorstores import Neo4jVector
-from langchain_community.graphs import Neo4jGraph
-from typing import Tuple, List, Optional
+from typing import Tuple, List
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 from langchain_community.vectorstores.neo4j_vector import remove_lucene_chars
 from langchain_groq import ChatGroq
-from langchain_google_genai import ChatGoogleGenerativeAI
 from dotenv import load_dotenv
 from langchain_community.embeddings import JinaEmbeddings
 from langchain.retrievers import ContextualCompressionRetriever
+from langchain_community.document_compressors import JinaRerank
 from langchain_qdrant import QdrantVectorStore
 
 
@@ -190,13 +188,44 @@ def create_vector_space():
 
 vector_index = create_vector_space()
 
+# # Instantiate jina reranker model
+# @st.cache_resource
+# def load_jina_reranker():
+#     return JinaRerank(model_name="jina-reranker-v2-base-multilingual")
+
+# jina_reranker = load_jina_reranker()
+
 def retrieve_context_by_vector(question):
     question = remove_lucene_chars_cust(question)
     return [el for el in vector_index.similarity_search(question, k=4)]
 
+def retrieve_context_by_vector_with_reranker(question):
+    question = remove_lucene_chars_cust(question)
+
+    retriever = vector_index.as_retriever(
+        search_type = 'similarity',
+        search_kwargs = {
+            'k' : 20,
+        }
+    )
+    
+    compressor = JinaRerank(model="jina-reranker-v2-base-multilingual")
+
+    compression_retriever = ContextualCompressionRetriever(
+        base_compressor=compressor, base_retriever=retriever
+    )
+
+    compressed_docs = compression_retriever.invoke(
+        question
+    )
+
+    return compressed_docs
+
+
+
 # Retrival knowledge
 def retriever(question: str):
-    unstructured_data = retrieve_context_by_vector(question)
+    unstructured_data = retrieve_context_by_vector_with_reranker(question)
 
     documents = []
     
@@ -357,7 +386,7 @@ template = """Your name is OPA. You are a great, friendly and professional AI ch
 {context}
 
 ### Important Instructions:
-- Base your response only on the provided context. Do not assume facts not included here.
+- Base your response only on the provided context. If the contexts provided do not match, say you don't know.
 
 Your Answer: """
 
