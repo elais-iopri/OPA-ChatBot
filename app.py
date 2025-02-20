@@ -353,11 +353,11 @@ template = """Your name is OPA. You are a great, friendly and professional AI ch
 ### User Question:
 {question}
 
-### Retrieved Context:
+### Context:
 {context}
 
 ### Important Instructions:
-- Base your response only on the provided context. Do not assume facts not included here.
+- Base your response only on the provided context. If the contexts provided do not match, say you don't know.
 
 Your Answer: """
 
@@ -417,7 +417,7 @@ Silahkan coba untuk menanyakan sesuatu seputar kultur kelapa sawit. Setelah itu,
     if st.button("Feedback Form", type="primary"):
         send_feedback()
 
-st.image(image="./assets/Logo-RPN.png", width=240)
+# st.image(image="./assets/Logo-RPN.png", width=240)
 st.header("(OPA) - Pakar Sawit", divider="gray")
 
 # Displaying all historical messages
