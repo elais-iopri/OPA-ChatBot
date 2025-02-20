@@ -29,6 +29,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from dotenv import load_dotenv
 from langchain_community.embeddings import JinaEmbeddings
 from langchain.retrievers import ContextualCompressionRetriever
+from langchain_community.document_compressors import JinaRerank
 from langchain_qdrant import QdrantVectorStore
 
 
@@ -194,9 +195,65 @@ def retrieve_context_by_vector(question):
     question = remove_lucene_chars_cust(question)
     return [el for el in vector_index.similarity_search(question, k=4)]
 
+def retrieve_context_by_vector_with_score_and_rerank(question: str, 
+                                                     k_initial: int = 20, 
+                                                     k_final: int = 4, 
+                                                     relevance_threshold: float = 0.5):
+    """
+    Mengambil konteks dari vector store dengan dua tahap:
+    1. Mengambil hasil awal beserta skor relevansi menggunakan similarity_search_with_score.
+    2. Menyaring dokumen berdasarkan ambang skor, lalu melakukan reranking menggunakan JinaRerank.
+    
+    Parameter:
+    - question: Pertanyaan pengguna.
+    - k_initial: Jumlah dokumen awal yang diambil.
+    - k_final: Jumlah dokumen akhir yang dikembalikan setelah reranking.
+    - relevance_threshold: Ambang skor untuk menyaring dokumen.
+    
+    Fungsi ini mencetak nilai skor dari hasil awal, kemudian mencetak konten hasil reranking.
+    """
+    # Bersihkan pertanyaan
+    cleaned_question = remove_lucene_chars_cust(question)
+    
+    # Ambil hasil awal dengan skor relevansi
+    initial_results = vector_index.similarity_search_with_score(cleaned_question, k=k_initial)
+    
+    # print("=== Hasil retrieval awal ===")
+    # for idx, (doc, score) in enumerate(initial_results, start=1):
+    #     print(f"Dokumen {idx}: Score = {score}")
+    #     print(f"Content: {doc.page_content}\n")
+    
+    # Saring dokumen berdasarkan ambang skor
+    filtered_docs = [doc for (doc, score) in initial_results if score >= relevance_threshold]
+    
+    # Bungkus fungsi penyedia dokumen dalam RunnableLambda (sesuai ekspektasi ContextualCompressionRetriever)
+    base_retriever_runnable = RunnableLambda(lambda q: filtered_docs)
+    
+    # Buat reranker dengan model JinaRerank
+    compressor = JinaRerank(model="jina-reranker-v2-base-multilingual")
+    
+    # Buat pipeline retriever dengan reranking
+    compression_retriever = ContextualCompressionRetriever(
+        base_compressor=compressor,
+        base_retriever=base_retriever_runnable
+    )
+    
+    # Lakukan reranking
+    reranked_docs = compression_retriever.invoke(cleaned_question)
+    
+    # Ambil hanya k_final dokumen teratas
+    final_docs = reranked_docs[:k_final]
+    
+    # print("=== Hasil reranking ===")
+    # for idx, doc in enumerate(final_docs, start=1):
+    #     print(f"Reranked Dokumen {idx}:")
+    #     print(f"{doc.page_content}\n")
+    
+    return final_docs
+
 # Retrival knowledge
 def retriever(question: str):
-    unstructured_data = retrieve_context_by_vector(question)
+    unstructured_data = retrieve_context_by_vector_with_score_and_rerank(question)
 
     documents = []
     
@@ -358,6 +415,7 @@ template = """Your name is OPA. You are a great, friendly and professional AI ch
 
 ### Important Instructions:
 - Base your response only on the provided context. Do not assume facts not included here.
+- When answering questions, do not include a greeting or introduction unless explicitly requested.
 
 Your Answer: """
 
