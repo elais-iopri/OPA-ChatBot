@@ -481,12 +481,12 @@ st.header("(OPA) - Pakar Sawit", divider="gray")
 
 # Displaying all historical messages
 for message in st.session_state.messages_product_knowledge:
-    st.chat_message(message['role']).markdown(message['content'])
+    st.chat_message(name = message['role'], avatar= "./assets/user_avatar.jpeg" if message["role"] == "user" else "./assets/OPA_avatar.jpeg").markdown(message['content'])
 
 if st.session_state.need_greetings_product_knowledge :
     # greet users
     greetings = "Selamat Datang, Saya adalah OPA, asisten virtual yang akan membantu anda terkait kultur kelapa sawit. Apakah ada yang bisa saya bantu?"
-    st.chat_message("assistant",).markdown(greetings)
+    st.chat_message(name="assistant", avatar= "./assets/OPA_avatar.jpeg").markdown(greetings)
 
     st.session_state.messages_product_knowledge.append({'role' : 'assistant', 'content': greetings})
 
@@ -500,7 +500,7 @@ prompt = st.chat_input()
 # Displaying chat prompt
 if prompt:
     # Displaying user chat prompt
-    with st.chat_message("user"):
+    with st.chat_message(name="user", avatar="./assets/user_avatar.jpeg"):
         st.markdown(prompt)
 
     try :
@@ -514,7 +514,7 @@ if prompt:
         st.session_state.messages_product_knowledge.append({'role' : 'user', 'content': prompt})
 
         # Displaying response
-        with st.chat_message("assistant",):
+        with st.chat_message("assistant", avatar="./assets/OPA_avatar.jpeg"):
             response = st.write_stream(stream_response(response))
 
         # Saving response to chat history in session state
