@@ -185,7 +185,7 @@ def get_openrouter_llm(model: str = "meta-llama/llama-3.3-70b-instruct") -> Chat
         # Pass the provider preference as an extra parameter
         extra_body={
             "provider": {
-                "order": ["DeepInfra"], # "specify provider preference"
+                "order": ["Friendli"], # "specify provider preference"
                 "allow_fallbacks" : True, # "Allow changing other providers, if the main provider is not available"
                 "sort" : "price" # "Sort the provider based on price"
             }
