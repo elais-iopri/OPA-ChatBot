@@ -196,9 +196,9 @@ def retrieve_context_by_vector(question):
     return [el for el in vector_index.similarity_search(question, k=4)]
 
 def retrieve_context_by_vector_with_score_and_rerank(question: str, 
-                                                     k_initial: int = 20, 
-                                                     k_final: int = 4, 
-                                                     relevance_threshold: float = 0.5):
+                                                     k_initial: int = 7, 
+                                                     k_final: int = 3, 
+                                                     relevance_threshold: float = 0.8):
     """
     Mengambil konteks dari vector store dengan dua tahap:
     1. Mengambil hasil awal beserta skor relevansi menggunakan similarity_search_with_score.
@@ -256,37 +256,38 @@ def retriever(question: str):
     unstructured_data = retrieve_context_by_vector_with_score_and_rerank(question)
 
     documents = []
+
+    # Not Include section header because the page content already include the section header
     
     for doc in unstructured_data:
-        sections = ""
+        # sections = ""
         
-        if "Header 1" in doc.metadata:
-            sections += f"Header 1 - {doc.metadata['Header 1']}\n"
+        # if "Header 1" in doc.metadata:
+        #     sections += f"Header 1 - {doc.metadata['Header 1']}\n"
 
-        if "Header 2" in doc.metadata:
-            sections += f"Header 2 - {doc.metadata['Header 2']}\n"
+        # if "Header 2" in doc.metadata:
+        #     sections += f"Header 2 - {doc.metadata['Header 2']}\n"
 
-        if "Header 3" in doc.metadata:
-            sections += f"Header 3 - {doc.metadata['Header 3']}\n"
+        # if "Header 3" in doc.metadata:
+        #     sections += f"Header 3 - {doc.metadata['Header 3']}\n"
 
-        if "Header 4" in doc.metadata:
-            sections += f"Header 4 - {doc.metadata['Header 4']}\n"
+        # if "Header 4" in doc.metadata:
+        #     sections += f"Header 4 - {doc.metadata['Header 4']}\n"
 
-        if "Header 5" in doc.metadata:
-            sections += f"Header 5 - {doc.metadata['Header 5']}\n"
+        # if "Header 5" in doc.metadata:
+        #     sections += f"Header 5 - {doc.metadata['Header 5']}\n"
 
+        # Section :
+        # {sections}
         documents.append(
             f"""
-Section :
-{sections}
 Content :
 {doc.page_content.replace("text: ", "")}
-"""
+    """
         )
     nl = "\n---\n"
     final_data = f"""
 
-Unstructured data:
 {nl.join(documents)}
 
 """
