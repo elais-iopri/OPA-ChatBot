@@ -25,7 +25,8 @@ from typing import Tuple, List, Optional
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 from langchain_community.vectorstores.neo4j_vector import remove_lucene_chars
 from langchain_groq import ChatGroq
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import ChatOpenAI
+from os import getenv
 from dotenv import load_dotenv
 from langchain_community.embeddings import JinaEmbeddings
 from langchain.retrievers import ContextualCompressionRetriever
@@ -165,15 +166,34 @@ def save_feedback_to_google_sheets(name,sesssion_id, bidang, rating, feedback, c
 
 
 # Load llm model using Groq
+# @st.cache_resource
+# def load_llm(KEY):
+#     return ChatGroq(
+#         model='llama-3.3-70b-versatile', #llama-3.1-70b-versatile, llama-3.1-8b-instant
+#         temperature=0,
+#         api_key=KEY
+#     )
+
+# llm = load_llm(st.secrets['GROQ_API_KEY'])
+
 @st.cache_resource
-def load_llm_groq(KEY):
-    return ChatGroq(
-        model='llama-3.3-70b-versatile', #llama-3.1-70b-versatile, llama-3.1-8b-instant
-        temperature=0,
-        api_key=KEY
+def get_openrouter_llm(model: str = "meta-llama/llama-3.3-70b-instruct") -> ChatOpenAI:
+    return ChatOpenAI(
+        model_name=model,
+        openai_api_key=st.secrets["OPENROUTER_API_KEY"],
+        openai_api_base=st.secrets["OPENROUTER_BASE_URL"],
+        # Pass the provider preference as an extra parameter
+        extra_body={
+            "provider": {
+                "order": ["DeepInfra"], # "specify provider preference"
+                "allow_fallbacks" : True, # "Allow changing other providers, if the main provider is not available"
+                "sort" : "price" # "Sort the provider based on price"
+            }
+        }
     )
 
-llm_groq = load_llm_groq(st.secrets['GROQ_API_KEY'])
+llm = get_openrouter_llm()
+
 
 # Integrate with Vector DB
 @st.cache_resource
@@ -398,7 +418,7 @@ _search_query = RunnableBranch(
             chat_history=lambda x: _format_chat_history(x["chat_history"])
         )
         | CONDENSE_QUESTION_PROMPT
-        | llm_groq
+        | llm
         | StrOutputParser(),
     ),
     # Else, we have no chat history, so just pass through the question
@@ -432,11 +452,11 @@ chain = (
         }
     )
     | prompt
-    | llm_groq
+    | llm
     | StrOutputParser()
 )
 
-def stream_response(response, delay=0.02):
+def stream_response(response, delay=0.01):
     for res in response:
         yield res
         time.sleep(delay)
