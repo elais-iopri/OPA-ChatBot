@@ -213,7 +213,7 @@ def retrieve_context_by_vector(question):
 def retrieve_context_by_vector_with_score_and_rerank(question: str, 
                                                      k_initial: int = 10, 
                                                      k_final: int = 3, 
-                                                     relevance_threshold: float = 0.7):
+                                                     relevance_threshold: float = 0.5):
     """
     Mengambil konteks dari vector store dengan dua tahap:
     1. Mengambil hasil awal beserta skor relevansi menggunakan similarity_search_with_score.
@@ -492,21 +492,56 @@ def stream_response(response, delay=0.01):
 #     if st.button("Feedback Form", type="primary"):
 #         send_feedback()
 
+def dialog_on_change(chat_id, index):
+    st.session_state.chat_histories_to_save[index]["feedback"] = st.session_state[f"text_area_{index}"]
+
+def save_text_feedback(collection_id, chat_id, feedback):
+    conversation_ref = db.collection("conversations").document(collection_id).collection("chat_histories").document(chat_id)
+
+    conversation_ref.update({
+        "feedback" : feedback
+    })
+
 @st.dialog("Feedback")
-def give_feedback_chat(chat_id):
+def give_feedback_chat(chat_id, index):
     st.write(f"Anda memberikan 👎 dari respon yang diberikan")
     st.write(chat_id)
 
-    reason = st.text_input("Berikan umpan balik")
+    feedback = st.text_area(
+            label="Beritahu kami",
+            placeholder="Tuliskan alasan kenapa memberikan feedback 👎",
+            key=f"text_area_{index}",
+            on_change=dialog_on_change,
+            args = [chat_id, index]
+        )
+    
     if st.button("Submit"):
-        print(reason)
-        st.rerun()
+        if "feedback" in st.session_state.chat_histories_to_save[index] :
+            if len(st.session_state.chat_histories_to_save[index]["feedback"].strip()) > 0 :
+                save_text_feedback(st.session_state.session_id, chat_id, feedback)
+                st.rerun()
+            else :
+                st.error("Silahkan isi feedback terlebih dahulu", icon="🚫")
+        else :
+            st.error("Silahkan isi feedback terlebih dahulu", icon="🚫")
 
-def save_chat_feedback(index, chat_id):
+
+def save_chat_feedback(index, chat_id, collection_id):
     thumb_mapping = ["DOWN", "UP"]
-    st.session_state.chat_histories_to_save[index]["thumb_score"] = thumb_mapping[st.session_state[f"fb_{index}"]] # thumb score saved in session state
+
+    thumb_score = thumb_mapping[st.session_state[f"fb_{index}"]]
+    st.session_state.chat_histories_to_save[index]["thumb_score"] = thumb_score # thumb score saved in session state
+
+    # update database
+    conversation_ref = db.collection("conversations").document(collection_id).collection("chat_histories").document(chat_id)
+
+    # update field
+    conversation_ref.update({
+        "thumb_score" : thumb_score
+    })
+
     if thumb_mapping[st.session_state[f"fb_{index}"]] == "DOWN" :
-        give_feedback_chat(chat_id)
+        give_feedback_chat(chat_id, index)
 
 def save_chat_collection(collection_id : str, ip_client : str) -> WriteResult:
     """
@@ -556,31 +591,31 @@ for num, message in enumerate(st.session_state.chat_histories_to_save):
                 options="thumbs",
                 key=f"fb_{num}",
                 on_change=save_chat_feedback,
-                args=[num, message["chat_id"]]
+                args=[num, message["chat_id"], st.session_state.session_id]
                 )
 
         else :
             if st.session_state.chat_histories_to_save[num]["thumb_score"] == "UP":
-                st.markdown("""
+               st.markdown("""
 <link href="https://fonts.googleapis.com/css2?family=Material+Icons" rel="stylesheet">
-<i class="material-icons" style="font-size:20px; color:black;">thumb_up</i>
-                """, unsafe_allow_html=True)
+<link href="https://fonts.googleapis.com/css2?family=Material+Icons+Outlined" rel="stylesheet">
+
+<i class="material-icons" style="font-size:20px; color:green;">thumb_up</i>
+<i class="material-icons-outlined" style="font-size:20px; color:black;">thumb_down</i>
+                           
+ """, unsafe_allow_html=True)
+            
             else :
-                # if st.session_state[f"fb_{num}"] is not None:
-                # give_feedback_chat(message["chat_id"], st.session_state.chat_histories_to_save[num]["thumb_score"])
-                # st.rerun()
                 st.markdown("""
 <link href="https://fonts.googleapis.com/css2?family=Material+Icons" rel="stylesheet">
-<i class="material-icons" style="font-size:20px; color:black;">thumb_down</i>
-                """, unsafe_allow_html=True)
+<link href="https://fonts.googleapis.com/css2?family=Material+Icons+Outlined" rel="stylesheet">
 
-if len(st.session_state.chat_histories_to_save) > 0:
-    st.write(st.session_state.chat_histories_to_save)
-
+<i class="material-icons-outlined" style="font-size:20px; color:black;">thumb_up</i>
+<i class="material-icons" style="font-size:20px; color:red;">thumb_down</i>
+""", unsafe_allow_html=True)
 
 # Getting chat input from user
 prompt = st.chat_input()
-
 
 # Displaying chat prompt
 if prompt:
@@ -590,79 +625,85 @@ if prompt:
     with st.chat_message(name="user", avatar="./assets/user_avatar.jpeg"):
         st.markdown(prompt)
 
-    # try :
-    # Getting response from llm model
-    response = chain.stream({
-        "chat_history" : st.session_state.chat_histories, 
-        "question" : prompt
-    })
+    try :
+        # Getting response from llm model
+        response = chain.stream({
+            "chat_history" : st.session_state.chat_histories, 
+            "question" : prompt
+        })
 
-    # Displaying response
-    with st.chat_message("assistant", avatar="./assets/OPA_avatar.jpeg"):
-        response = st.write_stream(stream_response(response))
+        # Displaying response
+        with st.chat_message("assistant", avatar="./assets/OPA_avatar.jpeg"):
+            response = st.write_stream(stream_response(response))
 
-        # Saving user prompt to session state
-        st.session_state.messages.append({'role' : 'user', 'content': prompt})
+            # Saving user prompt to session state
+            st.session_state.messages.append({'role' : 'user', 'content': prompt})
 
-        # Saving response to chat history in session state
-        st.session_state.messages.append({'role' : 'assistant', 'content': response})
+            # Saving response to chat history in session state
+            st.session_state.messages.append({'role' : 'assistant', 'content': response})
 
-        # Saving user and llm response to chat history
-        st.session_state.chat_histories.append((prompt, response))
+            # Saving user and llm response to chat history
+            st.session_state.chat_histories.append((prompt, response))
 
-        
-        chat_history_data = {
-            "chat_id" : _chat_id,
-            "chat_messages" : {
-                "user" : prompt,
-                "assistant" : response
-            },
-            "conversation_id" : st.session_state.session_id,
-            "created_at" : datetime.datetime.now(tz=datetime.timezone.utc),
-            "previous_chat_id" : st.session_state.previous_chat_id
-        }
             
-        st.session_state.chat_histories_to_save.append(
-            chat_history_data
-        )
+            chat_history_data = {
+                "chat_id" : _chat_id,
+                "chat_messages" : {
+                    "user" : prompt,
+                    "assistant" : response
+                },
+                "conversation_id" : st.session_state.session_id,
+                "created_at" : datetime.datetime.now(tz=datetime.timezone.utc),
+                "previous_chat_id" : st.session_state.previous_chat_id
+            }
+                
+            st.session_state.chat_histories_to_save.append(
+                chat_history_data
+            )
 
-        index_latest_chat = len(st.session_state.chat_histories_to_save) - 1
-        
-        if "thumb_score" not in st.session_state.chat_histories_to_save[index_latest_chat]:
-            selected_thumb_feedback = st.feedback (
-                options="thumbs",
-                key=f"fb_{index_latest_chat}",
-                on_change=save_chat_feedback,
-                args=[index_latest_chat, st.session_state.chat_histories_to_save[index_latest_chat]["chat_id"]]
-                )
+            index_latest_chat = len(st.session_state.chat_histories_to_save) - 1
             
-        else :
-            if st.session_state.chat_histories_to_save[num]["thumb_score"] == "UP":
-                st.markdown("""
-<link href="https://fonts.googleapis.com/css2?family=Material+Icons" rel="stylesheet">
-<i class="material-icons" style="font-size:20px; color:black;">thumb_up</i>
-                """, unsafe_allow_html=True)
+            if "thumb_score" not in st.session_state.chat_histories_to_save[index_latest_chat]:
+                selected_thumb_feedback = st.feedback (
+                    options="thumbs",
+                    key=f"fb_{index_latest_chat}",
+                    on_change=save_chat_feedback,
+                    args=[index_latest_chat, st.session_state.chat_histories_to_save[index_latest_chat]["chat_id"], st.session_state.session_id]
+                    )
+                
             else :
-                st.markdown("""
+                if st.session_state.chat_histories_to_save[num]["thumb_score"] == "UP":
+                    st.markdown("""
 <link href="https://fonts.googleapis.com/css2?family=Material+Icons" rel="stylesheet">
-<i class="material-icons" style="font-size:20px; color:black;">thumb_down</i>
-                """, unsafe_allow_html=True)
+<link href="https://fonts.googleapis.com/css2?family=Material+Icons+Outlined" rel="stylesheet">
 
-        # save chat conversation
-        if st.session_state.conversation_saved == False :
-            save_chat_collection(st.session_state.session_id, st.session_state.ip_client)
-            st.session_state.conversation_saved = True
-        
-        # save chat history
-        save_chat_history(st.session_state.session_id, chat_history_data)
+<i class="material-icons" style="font-size:20px; color:green;">thumb_up</i>
+<i class="material-icons-outlined" style="font-size:20px; color:black;">thumb_down</i>
+                           
+ """, unsafe_allow_html=True)
+            
+                else :
+                    st.markdown("""
+<link href="https://fonts.googleapis.com/css2?family=Material+Icons" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Icons+Outlined" rel="stylesheet">
 
-        st.session_state.previous_chat_id = _chat_id
+<i class="material-icons-outlined" style="font-size:20px; color:black;">thumb_up</i>
+<i class="material-icons" style="font-size:20px; color:red;">thumb_down</i>
+""", unsafe_allow_html=True)
 
-    # Just use 3 latest chat to chat history
-    if len(st.session_state.chat_histories) > 3:
-        st.session_state.chat_histories = st.session_state.chat_histories[-3:]
+            # save chat conversation
+            if st.session_state.conversation_saved == False :
+                save_chat_collection(st.session_state.session_id, st.session_state.ip_client)
+                st.session_state.conversation_saved = True
+            
+            # save chat history
+            save_chat_history(st.session_state.session_id, chat_history_data)
 
-    st.write(st.session_state.chat_histories_to_save)
+            st.session_state.previous_chat_id = _chat_id
 
-    # except Exception as e:
-    #     st.error(e)   
+        # Just use 3 latest chat to chat history
+        if len(st.session_state.chat_histories) > 3:
+            st.session_state.chat_histories = st.session_state.chat_histories[-3:]
+
+    except Exception as e:
+        st.error(e)   
