@@ -6,7 +6,11 @@ import gspread
 import time
 import pytz
 import random
+import requests
 import datetime
+import firebase_admin
+from firebase_admin import firestore
+from firebase_admin import credentials
 from uuid import uuid4
 from oauth2client.service_account import ServiceAccountCredentials
 from langchain_core.runnables import (
@@ -15,6 +19,7 @@ from langchain_core.runnables import (
     RunnableParallel,
     RunnablePassthrough,
 )
+from google.cloud.firestore_v1.types.write import WriteResult
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
@@ -48,7 +53,11 @@ start_counter = time.perf_counter()
 
 # Setup a session state to hold up all the old messages
 # Setting up session id
-st.session_state.session_id = str(uuid4()) 
+if 'session_id' not in st.session_state:
+    st.session_state.session_id = str(uuid4())
+
+if 'conversation_saved' not in st.session_state:
+    st.session_state.conversation_saved = False
 
 if 'messages' not in st.session_state:
     st.session_state.messages = []
@@ -101,6 +110,28 @@ def remove_lucene_chars_cust(text: str) -> str:
     
     return text.strip()
 
+# Function to get IP address
+def get_client_ip():
+    try:
+        response = requests.get("https://api64.ipify.org?format=json")
+        return response.json()["ip"]
+    except Exception as e:
+        return f"Error: {e}"
+    
+
+if 'ip_client' not in st.session_state:
+    st.session_state.ip_client = get_client_ip()
+    
+@st.cache_resource
+def connect_to_firebase_client():
+    # Use a service account
+    cred = credentials.Certificate(st.secrets["firebase_key"].to_dict())
+    firebase_admin.initialize_app(cred)
+
+    return firestore.client()
+
+db = connect_to_firebase_client()
+
 @st.cache_resource
 def connect_to_google_sheets():
     # Define the scope
@@ -141,17 +172,6 @@ def save_feedback_to_google_sheets(name,sesssion_id, bidang, rating, feedback, c
     sheet.append_row([datetime.now(pytz.timezone("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M:%S"), sesssion_id, name, bidang, rating, feedback, conversation])
 
 
-# Load llm model using Groq
-# @st.cache_resource
-# def load_llm(KEY):
-#     return ChatGroq(
-#         model='llama-3.3-70b-versatile', #llama-3.1-70b-versatile, llama-3.1-8b-instant
-#         temperature=0,
-#         api_key=KEY
-#     )
-
-# llm = load_llm(st.secrets['GROQ_API_KEY'])
-
 @st.cache_resource
 def get_openrouter_llm(model: str = "meta-llama/llama-3.3-70b-instruct") -> ChatOpenAI:
     return ChatOpenAI(
@@ -161,7 +181,7 @@ def get_openrouter_llm(model: str = "meta-llama/llama-3.3-70b-instruct") -> Chat
         # Pass the provider preference as an extra parameter
         extra_body={
             "provider": {
-                "order": ["DeepInfra"], # "specify provider preference"
+                "order": ["Nebius"], # "specify provider preference"
                 "allow_fallbacks" : True, # "Allow changing other providers, if the main provider is not available"
                 "sort" : "price" # "Sort the provider based on price"
             }
@@ -169,7 +189,6 @@ def get_openrouter_llm(model: str = "meta-llama/llama-3.3-70b-instruct") -> Chat
     )
 
 llm = get_openrouter_llm()
-
 
 # Integrate with Vector DB
 @st.cache_resource
@@ -192,9 +211,9 @@ def retrieve_context_by_vector(question):
     return [el for el in vector_index.similarity_search(question, k=4)]
 
 def retrieve_context_by_vector_with_score_and_rerank(question: str, 
-                                                     k_initial: int = 7, 
+                                                     k_initial: int = 10, 
                                                      k_final: int = 3, 
-                                                     relevance_threshold: float = 0.8):
+                                                     relevance_threshold: float = 0.7):
     """
     Mengambil konteks dari vector store dengan dua tahap:
     1. Mengambil hasil awal beserta skor relevansi menggunakan similarity_search_with_score.
@@ -411,7 +430,7 @@ template = """Your name is OPA. You are a great, friendly and professional AI ch
 {context}
 
 ### Important Instructions:
-- Base your response only on the provided context. If the contexts provided do not match, say you don't know.
+- Base your response only on the provided context. If the contexts provided do not match or don't exist, say you don't know.
 - When answering questions, do not include a greeting or introduction unless explicitly requested.
 
 Your Answer: """
@@ -436,6 +455,7 @@ def stream_response(response, delay=0.01):
     for res in response:
         yield res
         time.sleep(delay)
+
 
 # @st.dialog("Berikan Feedback")
 # def send_feedback():
@@ -472,19 +492,90 @@ def stream_response(response, delay=0.01):
 #     if st.button("Feedback Form", type="primary"):
 #         send_feedback()
 
+@st.dialog("Feedback")
+def give_feedback_chat(chat_id):
+    st.write(f"Anda memberikan 👎 dari respon yang diberikan")
+    st.write(chat_id)
+
+    reason = st.text_input("Berikan umpan balik")
+    if st.button("Submit"):
+        print(reason)
+        st.rerun()
+
+def save_chat_feedback(index, chat_id):
+    thumb_mapping = ["DOWN", "UP"]
+    st.session_state.chat_histories_to_save[index]["thumb_score"] = thumb_mapping[st.session_state[f"fb_{index}"]] # thumb score saved in session state
+    if thumb_mapping[st.session_state[f"fb_{index}"]] == "DOWN" :
+        give_feedback_chat(chat_id)
+
+def save_chat_collection(collection_id : str, ip_client : str) -> WriteResult:
+    """
+        collection_id => conversation_id (got from session id)
+    """
+    data = {
+        "conversation_id" : collection_id,
+        "created_at" : datetime.datetime.now(tz=datetime.timezone.utc),
+        "ip_client" : ip_client
+    }
+
+    conversation_ref = db.collection("conversations").document(collection_id) # create document with id => session id (UUID4)
+    
+    return conversation_ref.set(data) # add data to document
+   
+
+def save_chat_history(collection_id : str, chat_history : dict) -> WriteResult:
+    """
+        collectio_id => conversation_id,
+        chat_history => dict of sub collection to save
+    """
+
+    conversation_ref = db.collection("conversations").document(collection_id) # Get conversation collection ref
+
+    # Create new sub collection and new document
+    return conversation_ref.collection("chat_histories").document(chat_history["chat_id"]).set(chat_history) # add data to document
+
 # st.image(image="./assets/Logo-RPN.png", width=240)
 st.header("(OPA) - Pakar Sawit", divider="gray")
 
-# Displaying all historical messages
-for message in st.session_state.messages:
-    st.chat_message(name = message['role'], avatar= "./assets/user_avatar.jpeg" if message["role"] == "user" else "./assets/OPA_avatar.jpeg").markdown(message['content'])
+greetings = "Selamat Datang, Saya adalah OPA, asisten virtual yang akan membantu anda terkait kultur kelapa sawit. Apakah ada yang bisa saya bantu?"
+st.chat_message(name="assistant", avatar= "./assets/OPA_avatar.jpeg").markdown(greetings)
 
-if st.session_state.need_greetings :
-    # greet users
-    greetings = "Selamat Datang, Saya adalah OPA, asisten virtual yang akan membantu anda terkait kultur kelapa sawit. Apakah ada yang bisa saya bantu?"
-    st.chat_message(name="assistant", avatar= "./assets/OPA_avatar.jpeg").markdown(greetings)
-    st.session_state.messages.append({'role' : 'assistant', 'content': greetings})
-    st.session_state.need_greetings = False
+# Displaying all historical messages
+for num, message in enumerate(st.session_state.chat_histories_to_save):
+    
+    # message_role = list(message["chat_messages"].keys())
+    
+    with st.chat_message(name= "user", avatar= "./assets/user_avatar.jpeg") :
+        st.markdown(st.session_state.chat_histories_to_save[num]["chat_messages"]["user"])
+
+    with st.chat_message(name= "assistant", avatar= "./assets/OPA_avatar.jpeg") :
+        st.markdown(st.session_state.chat_histories_to_save[num]["chat_messages"]["assistant"])
+
+        if "thumb_score" not in message:
+            selected_thumb_feedback = st.feedback (
+                options="thumbs",
+                key=f"fb_{num}",
+                on_change=save_chat_feedback,
+                args=[num, message["chat_id"]]
+                )
+
+        else :
+            if st.session_state.chat_histories_to_save[num]["thumb_score"] == "UP":
+                st.markdown("""
+<link href="https://fonts.googleapis.com/css2?family=Material+Icons" rel="stylesheet">
+<i class="material-icons" style="font-size:20px; color:black;">thumb_up</i>
+                """, unsafe_allow_html=True)
+            else :
+                # if st.session_state[f"fb_{num}"] is not None:
+                # give_feedback_chat(message["chat_id"], st.session_state.chat_histories_to_save[num]["thumb_score"])
+                # st.rerun()
+                st.markdown("""
+<link href="https://fonts.googleapis.com/css2?family=Material+Icons" rel="stylesheet">
+<i class="material-icons" style="font-size:20px; color:black;">thumb_down</i>
+                """, unsafe_allow_html=True)
+
+if len(st.session_state.chat_histories_to_save) > 0:
+    st.write(st.session_state.chat_histories_to_save)
 
 
 # Getting chat input from user
@@ -493,24 +584,25 @@ prompt = st.chat_input()
 
 # Displaying chat prompt
 if prompt:
+    _chat_id = str(uuid4())
 
     # Displaying user chat prompt
     with st.chat_message(name="user", avatar="./assets/user_avatar.jpeg"):
         st.markdown(prompt)
 
-    try :
-        # Getting response from llm model
-        response = chain.stream({
-            "chat_history" : st.session_state.chat_histories, 
-            "question" : prompt
-        })
-        
+    # try :
+    # Getting response from llm model
+    response = chain.stream({
+        "chat_history" : st.session_state.chat_histories, 
+        "question" : prompt
+    })
+
+    # Displaying response
+    with st.chat_message("assistant", avatar="./assets/OPA_avatar.jpeg"):
+        response = st.write_stream(stream_response(response))
+
         # Saving user prompt to session state
         st.session_state.messages.append({'role' : 'user', 'content': prompt})
-
-        # Displaying response
-        with st.chat_message("assistant", avatar="./assets/OPA_avatar.jpeg"):
-            response = st.write_stream(stream_response(response))
 
         # Saving response to chat history in session state
         st.session_state.messages.append({'role' : 'assistant', 'content': response})
@@ -518,11 +610,59 @@ if prompt:
         # Saving user and llm response to chat history
         st.session_state.chat_histories.append((prompt, response))
 
-        # Just use 3 latest chat to chat history
-        if len(st.session_state.chat_histories) > 3:
-            st.session_state.chat_histories = st.session_state.chat_histories[-3:]
+        
+        chat_history_data = {
+            "chat_id" : _chat_id,
+            "chat_messages" : {
+                "user" : prompt,
+                "assistant" : response
+            },
+            "conversation_id" : st.session_state.session_id,
+            "created_at" : datetime.datetime.now(tz=datetime.timezone.utc),
+            "previous_chat_id" : st.session_state.previous_chat_id
+        }
+            
+        st.session_state.chat_histories_to_save.append(
+            chat_history_data
+        )
 
-        st.write(st.session_state.chat_history_to_save)
+        index_latest_chat = len(st.session_state.chat_histories_to_save) - 1
+        
+        if "thumb_score" not in st.session_state.chat_histories_to_save[index_latest_chat]:
+            selected_thumb_feedback = st.feedback (
+                options="thumbs",
+                key=f"fb_{index_latest_chat}",
+                on_change=save_chat_feedback,
+                args=[index_latest_chat, st.session_state.chat_histories_to_save[index_latest_chat]["chat_id"]]
+                )
+            
+        else :
+            if st.session_state.chat_histories_to_save[num]["thumb_score"] == "UP":
+                st.markdown("""
+<link href="https://fonts.googleapis.com/css2?family=Material+Icons" rel="stylesheet">
+<i class="material-icons" style="font-size:20px; color:black;">thumb_up</i>
+                """, unsafe_allow_html=True)
+            else :
+                st.markdown("""
+<link href="https://fonts.googleapis.com/css2?family=Material+Icons" rel="stylesheet">
+<i class="material-icons" style="font-size:20px; color:black;">thumb_down</i>
+                """, unsafe_allow_html=True)
 
-    except Exception as e:
-        st.error(e)   
+        # save chat conversation
+        if st.session_state.conversation_saved == False :
+            save_chat_collection(st.session_state.session_id, st.session_state.ip_client)
+            st.session_state.conversation_saved = True
+        
+        # save chat history
+        save_chat_history(st.session_state.session_id, chat_history_data)
+
+        st.session_state.previous_chat_id = _chat_id
+
+    # Just use 3 latest chat to chat history
+    if len(st.session_state.chat_histories) > 3:
+        st.session_state.chat_histories = st.session_state.chat_histories[-3:]
+
+    st.write(st.session_state.chat_histories_to_save)
+
+    # except Exception as e:
+    #     st.error(e)   
