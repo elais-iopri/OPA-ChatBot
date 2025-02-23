@@ -2,3 +2,7 @@
 .streamlit/
 *.toml
 test_api.py
+test_firebase.ipynb
+test_firebase.py
+test_st.py
+credentials.json

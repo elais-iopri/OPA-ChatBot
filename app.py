@@ -6,9 +6,9 @@ import gspread
 import time
 import pytz
 import random
+import datetime
 from uuid import uuid4
 from oauth2client.service_account import ServiceAccountCredentials
-from datetime import datetime
 from langchain_core.runnables import (
     RunnableBranch,
     RunnableLambda,
@@ -50,47 +50,23 @@ start_counter = time.perf_counter()
 # Setting up session id
 st.session_state.session_id = str(uuid4()) 
 
-if 'messages_product_knowledge' not in st.session_state:
-    st.session_state.messages_product_knowledge = []
+if 'messages' not in st.session_state:
+    st.session_state.messages = []
 
 if '_log' not in st.session_state:
     st.session_state['_log'] = []
 
-if 'chat_history_product_knowledge' not in st.session_state:
-    st.session_state.chat_history_product_knowledge = []
+if 'chat_histories' not in st.session_state:
+    st.session_state.chat_histories = []
 
-if 'need_greetings_product_knowledge' not in st.session_state:
-    st.session_state.need_greetings_product_knowledge = True
+if 'chat_histories_to_save' not in st.session_state:
+    st.session_state.chat_histories_to_save = []
 
-if 'convert_status' not in st.session_state:
-    st.session_state.convert_status = None
+if 'need_greetings' not in st.session_state:
+    st.session_state.need_greetings = True
 
-if 'conversion_done' not in st.session_state:
-    st.session_state.conversion_done = None
-
-if 'conversion_running' not in st.session_state:
-    st.session_state.conversion_running = None
-
-if 'idx_llm' not in st.session_state:
-    st.session_state['idx_llm'] = 0
-
-if 'total_time' not in st.session_state:
-    st.session_state['total_time'] = 0
-
-# st.write(st.session_state.convert_status)
-if st.session_state.conversion_done is not None:
-    if st.session_state.conversion_done:
-        st.toast("Document conversion finished!", icon="✅")  # Or use st.success
-        st.session_state.conversion_done = False  # Reset to avoid repeated toasts
-
-if 'current_main_key_idx' not in st.session_state:
-    st.session_state.current_main_key_idx = random.randint(0, 4)  # Pilih main key secara acak
-
-if 'use_backup' not in st.session_state:
-    st.session_state.use_backup = False
-
-if 'backup_idx' not in st.session_state:
-    st.session_state.backup_idx = -1
+if 'previous_chat_id' not in st.session_state:
+    st.session_state.previous_chat_id = None
 
 def remove_lucene_chars_cust(text: str) -> str:
     """Remove Lucene special characters"""
@@ -185,7 +161,7 @@ def get_openrouter_llm(model: str = "meta-llama/llama-3.3-70b-instruct") -> Chat
         # Pass the provider preference as an extra parameter
         extra_body={
             "provider": {
-                "order": ["Friendli"], # "specify provider preference"
+                "order": ["DeepInfra"], # "specify provider preference"
                 "allow_fallbacks" : True, # "Allow changing other providers, if the main provider is not available"
                 "sort" : "price" # "Sort the provider based on price"
             }
@@ -476,7 +452,7 @@ def stream_response(response, delay=0.01):
 #             # Save data to Google Sheets
 #             if selected_rating is not None:
 #                 # sesssion_id, name, bidang, rating, feedback, conversation
-#                 save_feedback_to_google_sheets(st.session_state.session_id, name, bidang, rating[selected_rating], feedback, st.session_state.messages_product_knowledge)
+#                 save_feedback_to_google_sheets(st.session_state.session_id, name, bidang, rating[selected_rating], feedback, st.session_state.messages)
 #                 st.success("Terimakasih atas umpan balik anda!")
 #             else:
 #                 st.error("Tolong berikan rating 🙏")
@@ -500,17 +476,15 @@ def stream_response(response, delay=0.01):
 st.header("(OPA) - Pakar Sawit", divider="gray")
 
 # Displaying all historical messages
-for message in st.session_state.messages_product_knowledge:
+for message in st.session_state.messages:
     st.chat_message(name = message['role'], avatar= "./assets/user_avatar.jpeg" if message["role"] == "user" else "./assets/OPA_avatar.jpeg").markdown(message['content'])
 
-if st.session_state.need_greetings_product_knowledge :
+if st.session_state.need_greetings :
     # greet users
     greetings = "Selamat Datang, Saya adalah OPA, asisten virtual yang akan membantu anda terkait kultur kelapa sawit. Apakah ada yang bisa saya bantu?"
     st.chat_message(name="assistant", avatar= "./assets/OPA_avatar.jpeg").markdown(greetings)
-
-    st.session_state.messages_product_knowledge.append({'role' : 'assistant', 'content': greetings})
-
-    st.session_state.need_greetings_product_knowledge = False
+    st.session_state.messages.append({'role' : 'assistant', 'content': greetings})
+    st.session_state.need_greetings = False
 
 
 # Getting chat input from user
@@ -519,6 +493,7 @@ prompt = st.chat_input()
 
 # Displaying chat prompt
 if prompt:
+
     # Displaying user chat prompt
     with st.chat_message(name="user", avatar="./assets/user_avatar.jpeg"):
         st.markdown(prompt)
@@ -526,26 +501,28 @@ if prompt:
     try :
         # Getting response from llm model
         response = chain.stream({
-            "chat_history" : st.session_state.chat_history_product_knowledge, 
+            "chat_history" : st.session_state.chat_histories, 
             "question" : prompt
         })
         
         # Saving user prompt to session state
-        st.session_state.messages_product_knowledge.append({'role' : 'user', 'content': prompt})
+        st.session_state.messages.append({'role' : 'user', 'content': prompt})
 
         # Displaying response
         with st.chat_message("assistant", avatar="./assets/OPA_avatar.jpeg"):
             response = st.write_stream(stream_response(response))
 
         # Saving response to chat history in session state
-        st.session_state.messages_product_knowledge.append({'role' : 'assistant', 'content': response})
+        st.session_state.messages.append({'role' : 'assistant', 'content': response})
 
         # Saving user and llm response to chat history
-        st.session_state.chat_history_product_knowledge.append((prompt, response))
+        st.session_state.chat_histories.append((prompt, response))
 
         # Just use 3 latest chat to chat history
-        if len(st.session_state.chat_history_product_knowledge) > 3:
-            st.session_state.chat_history_product_knowledge = st.session_state.chat_history_product_knowledge[-3:]
+        if len(st.session_state.chat_histories) > 3:
+            st.session_state.chat_histories = st.session_state.chat_histories[-3:]
+
+        st.write(st.session_state.chat_history_to_save)
 
     except Exception as e:
         st.error(e)   
