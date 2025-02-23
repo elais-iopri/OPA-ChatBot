@@ -268,7 +268,7 @@ def retrieve_context_by_vector_with_score_and_rerank(question: str,
 
 # Retrival knowledge
 def retriever(question: str):
-    unstructured_data = retrieve_context_by_vector_with_score_and_rerank(question)
+    unstructured_data = retrieve_context_by_vector(question)
 
     documents = []
 
@@ -504,8 +504,8 @@ def save_text_feedback(collection_id, chat_id, feedback):
 
 @st.dialog("Feedback")
 def give_feedback_chat(chat_id, index):
-    st.write(f"Anda memberikan 👎 dari respon yang diberikan")
-    st.write(chat_id)
+    st.write(f"Anda memberikan 👎 dari respon chatbot")
+    # st.write(chat_id)
 
     feedback = st.text_area(
             label="Beritahu kami",
@@ -519,6 +519,8 @@ def give_feedback_chat(chat_id, index):
         if "feedback" in st.session_state.chat_histories_to_save[index] :
             if len(st.session_state.chat_histories_to_save[index]["feedback"].strip()) > 0 :
                 save_text_feedback(st.session_state.session_id, chat_id, feedback)
+                st.success("Terimakasih atas feedback anda", icon="👍")
+                time.sleep(1)
                 st.rerun()
             else :
                 st.error("Silahkan isi feedback terlebih dahulu", icon="🚫")
@@ -569,10 +571,20 @@ def save_chat_history(collection_id : str, chat_history : dict) -> WriteResult:
     # Create new sub collection and new document
     return conversation_ref.collection("chat_histories").document(chat_history["chat_id"]).set(chat_history) # add data to document
 
-# st.image(image="./assets/Logo-RPN.png", width=240)
-st.header("(OPA) - Pakar Sawit", divider="gray")
+# Logo OPA
+col1, col2, col3 = st.columns([1, 2, 1])
 
-greetings = "Selamat Datang, Saya adalah OPA, asisten virtual yang akan membantu anda terkait kultur kelapa sawit. Apakah ada yang bisa saya bantu?"
+with col2:
+    st.image("./assets/logo_opa.png", width=300)
+    st.write("")  # Baris kosong pertama
+    st.write("")  # Baris kosong kedua
+    st.write("")  # Baris kosong pertama
+    st.write("")  # Baris kosong kedua
+
+# # st.image(image="./assets/Logo-RPN.png", width=240)
+# st.header("(OPA) - Pakar Sawit", divider="gray")
+
+greetings = "Halo, saya OPA, Pakar Sawit Anda dari PT. RPN, Pusat Penelitian Sawit. Apakah ada yang bisa saya bantu?"
 st.chat_message(name="assistant", avatar= "./assets/OPA_avatar.jpeg").markdown(greetings)
 
 # Displaying all historical messages
@@ -600,8 +612,8 @@ for num, message in enumerate(st.session_state.chat_histories_to_save):
 <link href="https://fonts.googleapis.com/css2?family=Material+Icons" rel="stylesheet">
 <link href="https://fonts.googleapis.com/css2?family=Material+Icons+Outlined" rel="stylesheet">
 
-<i class="material-icons" style="font-size:20px; color:green;">thumb_up</i>
-<i class="material-icons-outlined" style="font-size:20px; color:black;">thumb_down</i>
+<i class="material-icons" style="font-size:20px; color:#01b6a2;">thumb_up</i>
+<i class="material-icons-outlined" style="font-size:20px; color:#31333f99;">thumb_down</i>
                            
  """, unsafe_allow_html=True)
             
@@ -610,8 +622,8 @@ for num, message in enumerate(st.session_state.chat_histories_to_save):
 <link href="https://fonts.googleapis.com/css2?family=Material+Icons" rel="stylesheet">
 <link href="https://fonts.googleapis.com/css2?family=Material+Icons+Outlined" rel="stylesheet">
 
-<i class="material-icons-outlined" style="font-size:20px; color:black;">thumb_up</i>
-<i class="material-icons" style="font-size:20px; color:red;">thumb_down</i>
+<i class="material-icons-outlined" style="font-size:20px; color:#31333f99;">thumb_up</i>
+<i class="material-icons" style="font-size:20px; color:#fa6e00;">thumb_down</i>
 """, unsafe_allow_html=True)
 
 # Getting chat input from user
