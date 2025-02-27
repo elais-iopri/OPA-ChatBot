@@ -1,6 +1,5 @@
 import time
 import requests
-import json
 import socket
 import platform
 import uuid
@@ -95,41 +94,4 @@ def get_public_ip():
         return response.text
     except Exception as e:
         return f"Error mendapatkan IP publik: {str(e)}"
-
-# def main():
-#     while True:
-#         print("\n===== PROGRAM GEO LOCATION & DEVICE INFO =====")
-#         print("1. Cek geolokasi dari alamat IP")
-#         print("2. Cek geolokasi IP saya")
-#         print("3. Lihat informasi perangkat saya")
-#         print("4. Keluar")
-        
-#         choice = input("\nPilih menu (1-4): ")
-        
-#         if choice == "1":
-#             ip_address = input("Masukkan alamat IP yang ingin dicek: ")
-#             result = get_ip_geolocation(ip_address)
-#             print("\n--- HASIL GEOLOKASI ---")
-#             print(json.dumps(result, indent=2))
-            
-#         elif choice == "2":
-#             my_ip = get_public_ip()
-#             print(f"\nIP publik Anda: {my_ip}")
-#             result = get_ip_geolocation(my_ip)
-#             print("\n--- HASIL GEOLOKASI IP ANDA ---")
-#             print(json.dumps(result, indent=2))
-            
-#         elif choice == "3":
-#             device_info = get_device_info()
-#             print("\n--- INFORMASI PERANGKAT ---")
-#             print(json.dumps(device_info, indent=2))
-            
-#         elif choice == "4":
-#             print("Terima kasih telah menggunakan program ini!")
-#             break
-            
-#         else:
-#             print("Pilihan tidak valid. Silakan pilih 1-4.")
-
-# if __name__ == "__main__":
-#     main()
+    

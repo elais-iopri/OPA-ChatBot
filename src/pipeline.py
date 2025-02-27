@@ -140,11 +140,10 @@ But don't explain in  output. just give the parafrased question as output.
 
     # Chat history fromatter
     def _format_chat_histories(self, chat_histories: List[Dict]) -> List:
-        print("its here")
         buffer = []
         for message in chat_histories:
-            buffer.append(HumanMessage(message["chat_messages"]["user"]))
-            buffer.append(AIMessage(content=message["chat_messages"]["assistant"]))
+            buffer.append(HumanMessage(message["message_user"]))
+            buffer.append(AIMessage(content=message["message_assistant"]))
         return buffer
     
     def _retrieve_context_by_vector(self, question) -> List[Document]:

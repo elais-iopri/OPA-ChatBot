@@ -1,11 +1,16 @@
 import streamlit as st
-import datetime
 from uuid import uuid4
-from src.utils import stream_response
-from src.streamlit import get_vector_index, get_open_router_llm, get_chat_opa
-from typing import (
-    Optional,
-    List
+from src.utils import stream_response, get_public_ip
+from src.streamlit import (
+    get_vector_index, get_open_router_llm, get_chat_opa,
+    send_feedback)
+
+from src.database import (
+    check_ip_already_exists,
+    save_new_user,
+    get_user_by_id,
+    save_conversation,
+    save_chat_history
 )
 
 # Get open router llm
@@ -24,6 +29,16 @@ chat_opa = get_chat_opa(
 if "chat_histories" not in st.session_state:
     st.session_state.chat_histories = []
 
+# Seesion for save conversation logic
+if "conversation_id" not in st.session_state:
+    st.session_state.conversation_id = str(uuid4())
+
+if "conversation_saved" not in st.session_state:
+    st.session_state.conversation_saved = False
+
+if "conversation_data" not in st.session_state:
+    st.session_state.conversation_data = None
+
 # Initialize chat memory
 if "chat_memory" not in st.session_state:
     st.session_state.chat_memory = []
@@ -35,29 +50,52 @@ if "session_id" not in st.session_state:
 if "previous_chat_id" not in st.session_state:
     st.session_state.previous_chat_id = None
 
+# Store IP Client
+if "ip_address" not in st.session_state:
+    st.session_state.ip_address = get_public_ip()
+
+# Saving user session
+if "user_session" not in st.session_state:
+    st.session_state.user_session = check_ip_already_exists(st.session_state.ip_address)
+
+# Check if IP already exists
+if st.session_state.user_session is None:
+    _user_id = save_new_user(st.session_state.ip_address, st.session_state.session_id)
+    st.session_state.user_session = get_user_by_id(_user_id)
+    
+# Feedback Form
+with st.expander("Chat OPA", icon=":material/priority_high:", expanded=False):
+    st.markdown(body=
+"""
+Chat OPA adalah asisten virtual yang akan membantu anda terkait kultur kelapa sawit.
+
+**Aplikasi** ini sedang dalam pengembangan dan memerlukan **Feedback** dari pengguna.
+
+Silahkan coba untuk menanyakan sesuatu seputar kultur kelapa sawit. Setelah itu, mohon untuk mengisi *Feedback Form* dibawah ini.
+"""
+)
+
+    if st.button("Feedback Form", type="primary"):
+        send_feedback()
+
 # Logo OPA
 col1, col2, col3 = st.columns([1, 2, 1])
 
 with col2:
     st.image("./assets/logo_opa.png", width=300)
-    st.write("")  # Baris kosong pertama
-    st.write("")  # Baris kosong kedua
-    st.write("")  # Baris kosong pertama
-    st.write("")  # Baris kosong kedua
+    st.write("\n\n\n")
 
 greetings = "Halo, saya OPA, Pakar Sawit Anda dari PT. RPN, Pusat Penelitian Sawit. Apakah ada yang bisa saya bantu?"
 st.chat_message(name="assistant", avatar= "./assets/OPA_avatar.jpeg").markdown(greetings)
 
 # Displaying all historical messages
 for num, message in enumerate(st.session_state.chat_histories):
-    
-    # message_role = list(message["chat_messages"].keys())
-    
+        
     with st.chat_message(name= "user", avatar= "./assets/user_avatar.jpeg") :
-        st.markdown(st.session_state.chat_histories[num]["chat_messages"]["user"])
+        st.markdown(message["message_user"])
 
     with st.chat_message(name= "assistant", avatar= "./assets/OPA_avatar.jpeg") :
-        st.markdown(st.session_state.chat_histories[num]["chat_messages"]["assistant"])
+        st.markdown(message["message_assistant"])
 
 # Getting chat input from user
 prompt = st.chat_input()
@@ -87,17 +125,27 @@ if prompt:
                     "user" : prompt,
                     "assistant" : response
                 },
-                "conversation_id" : st.session_state.session_id,
-                "created_at" : datetime.datetime.now(tz=datetime.timezone.utc),
                 "previous_chat_id" : st.session_state.previous_chat_id
             }
                 
-            st.session_state.chat_histories.append(
-                chat_history_data
-            )
+            # save chat conversation
+            if not st.session_state.conversation_saved:
+                st.session_state.conversation_data = save_conversation(
+                    {
+                        "conversation_id" : st.session_state.conversation_id,
+                        "user_id" : st.session_state.user_session["id"]
+                    }
+                )
+                
+                st.session_state.conversation_saved = True
 
-            index_latest_chat = len(st.session_state.chat_histories) - 1
+            # save chat history
+            _chat_temp = save_chat_history(chat_history_data, st.session_state.conversation_data)
 
+            if _chat_temp is not None:
+                st.session_state.chat_histories.append(_chat_temp)
+                del _chat_temp
+    
             st.session_state.previous_chat_id = _chat_id
 
         # Just use 3 latest chat to chat history
@@ -105,5 +153,6 @@ if prompt:
             st.session_state.chat_memory = [] = st.session_state.chat_histories[-3:]
         else:
             st.session_state.chat_memory = st.session_state.chat_histories
+
     except Exception as e:
         st.error(e)
