@@ -10,7 +10,8 @@ from src.database import (
     save_new_user,
     get_user_by_id,
     save_conversation,
-    save_chat_history
+    save_chat_history,
+    save_thumb_chat_feedback
 )
 
 # Get open router llm
@@ -58,6 +59,9 @@ if "ip_address" not in st.session_state:
 if "user_session" not in st.session_state:
     st.session_state.user_session = check_ip_already_exists(st.session_state.ip_address)
 
+if "_temp_feedback" not in st.session_state:
+    st.session_state._temp_feedback = None
+
 # Check if IP already exists
 if st.session_state.user_session is None:
     _user_id = save_new_user(st.session_state.ip_address, st.session_state.session_id)
@@ -96,6 +100,35 @@ for num, message in enumerate(st.session_state.chat_histories):
 
     with st.chat_message(name= "assistant", avatar= "./assets/OPA_avatar.jpeg") :
         st.markdown(message["message_assistant"])
+
+    
+        if message["thumb_score"] is None:
+            selected_thumb_feedback = st.feedback (
+                options="thumbs",
+                key=f"fb_{num}",
+                on_change=save_thumb_chat_feedback,
+                args=[num, message["id"]]
+                )
+
+        else :
+            if st.session_state.chat_histories[num]["thumb_score"] == 1:
+               st.markdown("""
+<link href="https://fonts.googleapis.com/css2?family=Material+Icons" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Icons+Outlined" rel="stylesheet">
+
+<i class="material-icons" style="font-size:20px; color:#01b6a2;">thumb_up</i>
+<i class="material-icons-outlined" style="font-size:20px; color:#31333f99;">thumb_down</i>
+                           
+ """, unsafe_allow_html=True)
+            
+            else :
+                st.markdown("""
+<link href="https://fonts.googleapis.com/css2?family=Material+Icons" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Icons+Outlined" rel="stylesheet">
+
+<i class="material-icons-outlined" style="font-size:20px; color:#31333f99;">thumb_up</i>
+<i class="material-icons" style="font-size:20px; color:#fa6e00;">thumb_down</i>
+""", unsafe_allow_html=True)
 
 # Getting chat input from user
 prompt = st.chat_input()
@@ -145,6 +178,36 @@ if prompt:
             if _chat_temp is not None:
                 st.session_state.chat_histories.append(_chat_temp)
                 del _chat_temp
+            
+            index_latest_chat = len(st.session_state.chat_histories) - 1
+            
+            if st.session_state.chat_histories[index_latest_chat]["thumb_score"] is None:
+                selected_thumb_feedback = st.feedback (
+                    options="thumbs",
+                    key=f"fb_{index_latest_chat}",
+                    on_change=save_thumb_chat_feedback,
+                    args=[index_latest_chat, st.session_state.chat_histories[index_latest_chat]["id"]]
+                    )
+                
+            else :
+                if st.session_state.chat_histories[index_latest_chat]["thumb_score"] == 1:
+                    st.markdown("""
+<link href="https://fonts.googleapis.com/css2?family=Material+Icons" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Icons+Outlined" rel="stylesheet">
+
+<i class="material-icons" style="font-size:20px; color:green;">thumb_up</i>
+<i class="material-icons-outlined" style="font-size:20px; color:black;">thumb_down</i>
+                           
+ """, unsafe_allow_html=True)
+            
+                else :
+                    st.markdown("""
+<link href="https://fonts.googleapis.com/css2?family=Material+Icons" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Icons+Outlined" rel="stylesheet">
+
+<i class="material-icons-outlined" style="font-size:20px; color:black;">thumb_up</i>
+<i class="material-icons" style="font-size:20px; color:red;">thumb_down</i>
+""", unsafe_allow_html=True)
     
             st.session_state.previous_chat_id = _chat_id
 

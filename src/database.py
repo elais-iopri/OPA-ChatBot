@@ -1,5 +1,7 @@
 import streamlit as st
 import datetime
+import html
+import time
 from typing import Dict
 from sqlalchemy import text
 
@@ -23,13 +25,17 @@ def save_chat_history(chat_history : Dict, conversation_data : Dict) -> Dict:
 
             result = session.execute(stmt, params=data)
 
+            session.commit()
+
             inserted_id = result.lastrowid
 
             stmt2 = text("SELECT * FROM feedback_chat.feedback WHERE id = :id")
             
             results_row = session.execute(stmt2, {"id" : inserted_id}).mappings().fetchone()
 
+        if results_row is not None:
             return dict(results_row)
+        return None
 
     except Exception as e:
         st.write(f"ERROR save_chat_history:\n{e}")
@@ -41,7 +47,10 @@ def get_user_by_id (user_id : int) -> Dict:
             stmt = text("SELECT id, ip_client_id, session_id FROM feedback_chat.users WHERE users.id = :user_id")
             result = session.execute(stmt, params={"user_id": user_id}).mappings().fetchone()
         
-        return dict(result)
+        if result is not None:
+            return dict(result)
+        
+        return None
     
     except Exception as e:
         st.write(f"ERROR getting user by id:\n{e}")
@@ -57,7 +66,10 @@ def check_ip_already_exists(ip_address: str) -> Dict:
             stmt = text("SELECT users.id, users.ip_client_id, users.session_id FROM ip_clients RIGHT JOIN users on ip_clients.id = users.ip_client_id WHERE ip_clients.ip_address = :ip_address")
             result = session.execute(stmt, params={"ip_address": ip_address}).mappings().fetchone()
         
-        return dict(result)
+        if result is not None:
+            return dict(result)
+        
+        return None
     
     except Exception as e:
         st.write(e)
@@ -151,9 +163,62 @@ def save_conversation(data : Dict) -> int:
             stmt2 = text('SELECT id, conversation_id, user_id FROM feedback_chat.chat_histories WHERE id = :id')
             result_row = session.execute(stmt2, {"id": inserted_id}).mappings().fetchone()
             
-        return dict(result_row)
+        if result_row is not None:
+            return dict(result_row)
+        
+        return None
 
     except Exception as e:
         st.write(f"ERROR saving conversation:\n {e}")
         return 0
- 
+
+
+def dialog_feedback_chat_on_change(index):       
+    st.session_state._temp_feedback = st.session_state[f"text_area_{index}"]
+
+@st.dialog("Feedback")
+def give_feedback_chat_dialog(chat_id, index):
+    st.write(f"Anda memberikan 👎 dari respon chatbot")
+
+    feedback = st.text_area(
+            label="Beritahu kami",
+            placeholder="Tuliskan alasan kenapa memberikan feedback 👎",
+            key=f"text_area_{index}",
+            on_change=dialog_feedback_chat_on_change,
+            args = [index]
+        )
+    
+    if st.button("Submit"):
+        if st.session_state._temp_feedback is not None and len(st.session_state._temp_feedback.strip()) > 0:
+            # st.write(chat_id)
+            # # st.write(st.session_state._temp_feedback)
+            save_text_feedback_chat(chat_id, feedback)
+            st.success("Terimakasih atas feedback anda", icon="👍")
+            st.session_state._temp_feedback = None
+            time.sleep(1)
+            st.rerun()
+        else :
+            st.error("Silahkan isi feedback terlebih dahulu", icon="🚫")
+
+def save_thumb_chat_feedback(index, id):
+    with conn.session as session :
+
+        stmt = text("UPDATE feedback_chat.feedback SET thumb_score = :thumb WHERE id = :id")
+        result = session.execute(stmt, params= {"thumb" : st.session_state[f"fb_{index}"], "id" : id})
+        st.session_state.chat_histories[index]["thumb_score"] = st.session_state[f"fb_{index}"] # thumb score saved in session state
+        session.commit()
+        
+    if st.session_state[f"fb_{index}"] == 0 :
+        give_feedback_chat_dialog(id, index)
+
+
+def save_text_feedback_chat(id, feedback) :
+    with conn.session as session:
+        stmt = text("INSERT INTO feedback_chat.feedback_tags(feedback_id, tag_value) VALUES (:id, :feedback)")
+        result = session.execute(stmt, params={"id" : id, "feedback" : html.escape(feedback)})
+        session.commit
+
+        if result.lastrowid > 0 :
+            return True
+        else :
+            return False

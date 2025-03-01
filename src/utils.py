@@ -1,3 +1,4 @@
+import streamlit as st
 import time
 import requests
 import socket
@@ -94,4 +95,3 @@ def get_public_ip():
         return response.text
     except Exception as e:
         return f"Error mendapatkan IP publik: {str(e)}"
-    

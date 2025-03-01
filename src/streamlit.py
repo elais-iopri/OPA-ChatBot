@@ -1,5 +1,4 @@
 import streamlit as st
-import time
 from langchain_openai import ChatOpenAI
 from langchain_qdrant import QdrantVectorStore
 from langchain_community.embeddings import JinaEmbeddings
@@ -68,29 +67,3 @@ def send_feedback():
                 st.success("Terimakasih atas umpan balik anda!")
             else:
                 st.error("Tolong berikan rating 🙏")
-
-
-@st.dialog("Feedback")
-def eedback_chat(chat_id, index):
-    st.write(f"Anda memberikan 👎 dari respon chatbot")
-    # st.write(chat_id)
-
-    feedback = st.text_area(
-            label="Beritahu kami",
-            placeholder="Tuliskan alasan kenapa memberikan feedback 👎",
-            key=f"text_area_{index}",
-            # on_change=dialog_on_change,
-            args = [chat_id, index]
-        )
-    
-    if st.button("Submit"):
-        if "feedback" in st.session_state.chat_histories[index] :
-            if len(st.session_state.chat_histories[index]["feedback"].strip()) > 0 :
-                # save_text_feedback(st.session_state.session_id, chat_id, feedback)
-                st.success("Terimakasih atas feedback anda", icon="👍")
-                time.sleep(1)
-                st.rerun()
-            else :
-                st.error("Silahkan isi feedback terlebih dahulu", icon="🚫")
-        else :
-            st.error("Silahkan isi feedback terlebih dahulu", icon="🚫")
