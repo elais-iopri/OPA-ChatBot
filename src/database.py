@@ -1,5 +1,4 @@
 import streamlit as st
-import datetime
 import html
 import time
 from typing import Dict
@@ -219,3 +218,26 @@ def save_text_chat_opa(id, feedback) :
             return True
         else :
             return False
+        
+def save_general_feedback(data : Dict):
+    payload = {
+        "user_id" : data["user_id"],
+        "session" : data["session"],
+        "name" : data["name"],
+        "bagian" : data["bagian"],
+        "sub_bagian" : data["sub_bagian"],
+        "puslit" : data["puslit"],
+        "feedback_rating" : data["rating"],
+        "feedback_value" : data["feedback"],
+    }
+
+    with conn.session as session:
+        stmt = text("INSERT INTO chat_opa.feedbacks (user_id, session, name, bagian, sub_bagian, puslit, feedback_rating, feedback_value) VALUES(:user_id, :session, :name, :bagian, :sub_bagian, :puslit, :feedback_rating, :feedback_value)")
+        result = session.execute(stmt, payload)
+        session.commit()
+
+        if result.lastrowid > 0 :
+            return True
+        else :
+            return False
+    

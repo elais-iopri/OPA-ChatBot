@@ -80,7 +80,10 @@ Silahkan coba untuk menanyakan sesuatu seputar kultur kelapa sawit. Setelah itu,
 )
 
     if st.button("Feedback Form", type="primary"):
-        send_feedback()
+        user_id = st.session_state.user_session["id"]
+        session_id = st.session_state.session_id
+
+        send_feedback(user_id, session_id)
 
 # Logo OPA
 col1, col2, col3 = st.columns([1, 2, 1])

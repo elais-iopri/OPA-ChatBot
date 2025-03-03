@@ -1,10 +1,12 @@
 import streamlit as st
+import time
 from langchain_openai import ChatOpenAI
 from langchain_qdrant import QdrantVectorStore
 from langchain_community.embeddings import JinaEmbeddings
 from langchain_community.document_compressors import JinaRerank
 from typing import Optional
 from src.pipeline import ChatOPA
+from src.database import save_general_feedback
 
 @st.cache_resource
 def get_vector_index(collection_name : str = "OPA_Chatbot") -> QdrantVectorStore:
@@ -48,22 +50,35 @@ def get_chat_opa(_openai: ChatOpenAI, _vector_index : QdrantVectorStore, reranke
     )
 
 @st.dialog("Berikan Feedback")
-def send_feedback():
+def send_feedback(user_id : str, session_id: str):
     with st.form(key="feedback_input", enter_to_submit=False, clear_on_submit=False):
         name = st.text_input("Nama")
-        bidang = st.text_input("Bidang")
+        bagian = st.text_input("Bagian")
+        sub_bagian = st.text_input("Sub-Bagian")
+        puslit = st.text_input("Puslit")
         feedback = st.text_area("Feedback")
 
         rating = [1, 2, 3, 4, 5]
         selected_rating = st.feedback(options="stars")
 
-        # print("INI FEEDBACK: ", feedback)
         if st.form_submit_button("Submit"):
             # Save data to Google Sheets
             if selected_rating is not None:
-                st.write(name, bidang, feedback, rating[selected_rating])
-                # sesssion_id, name, bidang, rating, feedback, conversation
-                # save_feedback_to_google_sheets(st.session_state.session_id, name, bidang, rating[selected_rating], feedback, st.session_state.messages)
+                data = {
+                    "user_id" : user_id,
+                    "session" : session_id,
+                    "name" : name,
+                    "bagian" : bagian,
+                    "sub_bagian" : sub_bagian,
+                    "puslit" : puslit,
+                    "rating" : rating[selected_rating],
+                    "feedback" : feedback,
+                }
+
+                save_general_feedback(data)
+
                 st.success("Terimakasih atas umpan balik anda!")
+                time.sleep(1)
+                st.rerun()
             else:
                 st.error("Tolong berikan rating 🙏")
