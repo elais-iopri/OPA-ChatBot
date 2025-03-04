@@ -1,7 +1,7 @@
 import streamlit as st
 import html
 import time
-from typing import Dict
+from typing import Dict, List
 from sqlalchemy import text
 
 conn = st.connection('chat_opa', type='sql')
@@ -29,7 +29,6 @@ def save_chat_history(chat_history : Dict, conversation_data : Dict) -> Dict:
             inserted_id = result.lastrowid
 
             stmt2 = text("SELECT * FROM chat_opa.chat_histories WHERE id = :id")
-            
             results_row = session.execute(stmt2, {"id" : inserted_id}).mappings().fetchone()
 
         if results_row is not None:
@@ -146,7 +145,7 @@ def save_new_user(ip_client : str, session_id : str) -> int:
 def save_conversation(data : Dict) -> int:
     try:
         data = {
-            "session_id" : data["conversation_id"],
+            "session_id" : data["conversation_session_id"],
             "user_id" : data["user_id"]
         }
         
@@ -186,8 +185,6 @@ def give_chat_opa_dialog(chat_id, index):
     
     if st.button("Submit"):
         if st.session_state._temp_feedback is not None and len(st.session_state._temp_feedback.strip()) > 0:
-            # st.write(chat_id)
-            # # st.write(st.session_state._temp_feedback)
             save_text_chat_opa(chat_id, feedback)
             st.success("Terimakasih atas feedback anda", icon="👍")
             st.session_state._temp_feedback = None
@@ -200,7 +197,7 @@ def save_thumb_chat_feedback(index, id):
     with conn.session as session :
 
         stmt = text("UPDATE chat_opa.chat_histories SET thumb_score = :thumb WHERE id = :id")
-        result = session.execute(stmt, params= {"thumb" : st.session_state[f"fb_{index}"], "id" : id})
+        session.execute(stmt, params= {"thumb" : st.session_state[f"fb_{index}"], "id" : id})
         st.session_state.chat_histories[index]["thumb_score"] = st.session_state[f"fb_{index}"] # thumb score saved in session state
         session.commit()
         
@@ -208,7 +205,7 @@ def save_thumb_chat_feedback(index, id):
         give_chat_opa_dialog(id, index)
 
 
-def save_text_chat_opa(id, feedback) :
+def save_text_chat_opa(id, feedback) -> bool:
     with conn.session as session:
         stmt = text("UPDATE chat_opa.chat_histories SET feedback = :feedback WHERE id = :id")
         result = session.execute(stmt, params={"id" : id, "feedback" : html.escape(feedback)})
@@ -219,7 +216,7 @@ def save_text_chat_opa(id, feedback) :
         else :
             return False
         
-def save_general_feedback(data : Dict):
+def save_general_feedback(data : Dict) -> bool:
     payload = {
         "user_id" : data["user_id"],
         "session" : data["session"],
@@ -241,3 +238,27 @@ def save_general_feedback(data : Dict):
         else :
             return False
     
+def get_chat_histories(conversation_session_id : str) -> List[Dict] :
+
+    response = []
+    with conn.session as session:
+        stmt = text("SELECT * FROM chat_opa.chat_histories WHERE conversation_session_id = :conversation_session_id ORDER BY created_at ASC")
+        result = session.execute(stmt, {"conversation_session_id" : conversation_session_id}).mappings()
+
+        for row in result:
+            response.append(dict(row))
+
+    return response
+
+def get_conversations(user_id : str) -> List[Dict]:
+    response = []
+
+    with conn.session as session:
+        stmt = text("SELECT conversations.id, conversations.session_id, conversations.user_id, chat_histories.message_user FROM conversations INNER JOIN chat_histories ON conversations.session_id = chat_histories.conversation_session_id WHERE chat_histories.previous_chat_id is NULL AND conversations.user_id = :user_id ORDER BY conversations.created_at DESC;")
+
+        result = session.execute(stmt, {"user_id" : user_id}).mappings()
+
+        for row in result:
+            response.append(dict(row))
+
+    return response

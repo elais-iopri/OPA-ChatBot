@@ -2,16 +2,19 @@ import streamlit as st
 from uuid import uuid4
 from src.utils import stream_response, get_public_ip
 from src.streamlit import (
-    get_vector_index, get_open_router_llm, get_chat_opa,
+    get_vector_index,
+    get_open_router_llm,
+    get_chat_opa,
     send_feedback)
-
 from src.database import (
     check_ip_already_exists,
     save_new_user,
     get_user_by_id,
     save_conversation,
     save_chat_history,
-    save_thumb_chat_feedback
+    save_thumb_chat_feedback,
+    get_chat_histories,
+    get_conversations
 )
 
 # Get open router llm
@@ -25,14 +28,6 @@ chat_opa = get_chat_opa(
     _openai = llm,
     _vector_index = vector_index,
 )
-
-# Initialize chat histories
-if "chat_histories" not in st.session_state:
-    st.session_state.chat_histories = []
-
-# Seesion for save conversation logic
-if "conversation_id" not in st.session_state:
-    st.session_state.conversation_id = str(uuid4())
 
 if "conversation_saved" not in st.session_state:
     st.session_state.conversation_saved = False
@@ -66,7 +61,70 @@ if "_temp_feedback" not in st.session_state:
 if st.session_state.user_session is None:
     _user_id = save_new_user(st.session_state.ip_address, st.session_state.session_id)
     st.session_state.user_session = get_user_by_id(_user_id)
-    
+
+st.session_state.user_conversations = get_conversations(st.session_state.user_session["id"])
+
+if "exist_conversation" not in st.session_state:
+    st.session_state.exist_conversation = None
+
+# Seesion for save conversation logic
+if "conversation_session_id" not in st.session_state:
+    st.session_state.conversation_session_id = str(uuid4())
+
+# Initialize chat histories
+if "chat_histories" not in st.session_state:
+    st.session_state.chat_histories = []
+
+if st.session_state.exist_conversation is not None:
+    # get chat history
+    st.session_state.chat_histories = get_chat_histories(st.session_state.exist_conversation)
+
+# Sidebar For Navigating to previous conversation
+with st.sidebar:    
+    st.markdown(
+        """
+# Chat OPA
+"""
+    )
+     
+    if st.button("💬  **Percakapan Baru**", use_container_width=True, type="secondary"):
+        st.session_state.exist_conversation = None
+        st.session_state.previous_chat_id = None
+        st.session_state.conversation_saved = False
+        st.session_state.conversation_session_id = str(uuid4())
+        st.session_state.chat_histories = []
+        st.rerun()
+
+    """
+    ---
+    """
+
+    st.write("**💬  Percakapan Terdahulu**")
+
+    if len(st.session_state.user_conversations) > 0 :
+        st.markdown(
+    """
+    <style>
+
+    div.stButton > button {
+        text-align: left !important;
+        display: block;
+    }
+
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+        for num, conversation in enumerate(st.session_state.user_conversations): # Bukan conversation histories melainkan session berbeda conversation!
+            label = conversation["message_user"]
+            if len(label) > 33:
+                label = label[:31] + " . . ."
+            if st.button(label, key = f"conv_btn_{num}", use_container_width=True, type="secondary"):
+                st.session_state.conversation_data = conversation
+                st.session_state.exist_conversation = conversation["session_id"]
+                st.session_state.conversation_saved = False
+                st.rerun()
+        
 # Feedback Form
 with st.expander("Chat OPA", icon=":material/priority_high:", expanded=False):
     st.markdown(body=
@@ -97,6 +155,7 @@ st.chat_message(name="assistant", avatar= "./assets/OPA_avatar.jpeg").markdown(g
 
 # Displaying all historical messages
 for num, message in enumerate(st.session_state.chat_histories):
+    st.session_state.previous_chat_id = message["chat_id"]
         
     with st.chat_message(name= "user", avatar= "./assets/user_avatar.jpeg") :
         st.markdown(message["message_user"])
@@ -104,7 +163,6 @@ for num, message in enumerate(st.session_state.chat_histories):
     with st.chat_message(name= "assistant", avatar= "./assets/OPA_avatar.jpeg") :
         st.markdown(message["message_assistant"])
 
-    
         if message["thumb_score"] is None:
             selected_thumb_feedback = st.feedback (
                 options="thumbs",
@@ -138,7 +196,7 @@ prompt = st.chat_input()
 
 # Displaying chat prompt
 if prompt:
-    _chat_id = str(uuid4())
+    _chat_id = str(uuid4()) # new session chat_session
 
     # Displaying user chat prompt
     with st.chat_message(name="user", avatar="./assets/user_avatar.jpeg"):
@@ -165,16 +223,18 @@ if prompt:
             }
                 
             # save chat conversation
-            if not st.session_state.conversation_saved:
+            if st.session_state.exist_conversation is None:
+                
                 st.session_state.conversation_data = save_conversation(
                     {
-                        "conversation_id" : st.session_state.conversation_id,
+                        "conversation_session_id" : st.session_state.conversation_session_id,
                         "user_id" : st.session_state.user_session["id"]
                     }
                 )
-                
-                st.session_state.conversation_saved = True
 
+                st.session_state.exist_conversation = st.session_state.conversation_data["session_id"]
+
+                        
             # save chat history
             _chat_temp = save_chat_history(chat_history_data, st.session_state.conversation_data)
 
@@ -191,34 +251,14 @@ if prompt:
                     on_change=save_thumb_chat_feedback,
                     args=[index_latest_chat, st.session_state.chat_histories[index_latest_chat]["id"]]
                     )
-                
-            else :
-                if st.session_state.chat_histories[index_latest_chat]["thumb_score"] == 1:
-                    st.markdown("""
-<link href="https://fonts.googleapis.com/css2?family=Material+Icons" rel="stylesheet">
-<link href="https://fonts.googleapis.com/css2?family=Material+Icons+Outlined" rel="stylesheet">
-
-<i class="material-icons" style="font-size:20px; color:green;">thumb_up</i>
-<i class="material-icons-outlined" style="font-size:20px; color:black;">thumb_down</i>
-                           
- """, unsafe_allow_html=True)
-            
-                else :
-                    st.markdown("""
-<link href="https://fonts.googleapis.com/css2?family=Material+Icons" rel="stylesheet">
-<link href="https://fonts.googleapis.com/css2?family=Material+Icons+Outlined" rel="stylesheet">
-
-<i class="material-icons-outlined" style="font-size:20px; color:black;">thumb_up</i>
-<i class="material-icons" style="font-size:20px; color:red;">thumb_down</i>
-""", unsafe_allow_html=True)
-    
-            st.session_state.previous_chat_id = _chat_id
 
         # Just use 3 latest chat to chat history
         if len(st.session_state.chat_histories) > 3:
             st.session_state.chat_memory = [] = st.session_state.chat_histories[-3:]
         else:
             st.session_state.chat_memory = st.session_state.chat_histories
+        
+        st.rerun()
 
     except Exception as e:
         st.error(e)
