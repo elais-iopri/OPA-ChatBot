@@ -1,498 +1,202 @@
-# Installing Dependencies
-import os
-import json
 import streamlit as st
-import gspread
-import time
-import pytz
-import random
-import datetime
 from uuid import uuid4
-from oauth2client.service_account import ServiceAccountCredentials
-from langchain_core.runnables import (
-    RunnableBranch,
-    RunnableLambda,
-    RunnableParallel,
-    RunnablePassthrough,
-)
-from langchain_core.messages import AIMessage, HumanMessage
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.prompts.prompt import PromptTemplate
-from langchain_community.vectorstores import Neo4jVector
-from langchain_community.graphs import Neo4jGraph
-from typing import Tuple, List, Optional
-from pydantic import BaseModel, Field, field_validator, ConfigDict
-from langchain_community.vectorstores.neo4j_vector import remove_lucene_chars
-from langchain_groq import ChatGroq
-from langchain_openai import ChatOpenAI
-from os import getenv
-from dotenv import load_dotenv
-from langchain_community.embeddings import JinaEmbeddings
-from langchain.retrievers import ContextualCompressionRetriever
-from langchain_community.document_compressors import JinaRerank
-from langchain_qdrant import QdrantVectorStore
-
-
-st.set_page_config(
-    page_title="OPA Chat",
-    layout="centered",
+from src.utils import stream_response, get_public_ip
+from src.streamlit import (
+    get_vector_index,
+    get_open_router_llm,
+    get_chat_opa,
+    send_feedback)
+from src.database import (
+    check_ip_already_exists,
+    save_new_user,
+    get_user_by_id,
+    save_conversation,
+    save_chat_history,
+    save_thumb_chat_feedback,
+    get_chat_histories,
+    get_conversations
 )
 
+# Get open router llm
+llm = get_open_router_llm()
 
-# Load environtment app
-load_dotenv()
+# create vector index
+vector_index = get_vector_index()
 
-# Start Counter
-start_counter = time.perf_counter()
+# Create chat opa instance
+chat_opa = get_chat_opa(
+    _openai = llm,
+    _vector_index = vector_index,
+)
 
-# Setup a session state to hold up all the old messages
-# Setting up session id
-st.session_state.session_id = str(uuid4()) 
+if "conversation_saved" not in st.session_state:
+    st.session_state.conversation_saved = False
 
-if 'messages' not in st.session_state:
-    st.session_state.messages = []
+if "conversation_data" not in st.session_state:
+    st.session_state.conversation_data = None
 
-if '_log' not in st.session_state:
-    st.session_state['_log'] = []
+# Initialize chat memory
+if "chat_memory" not in st.session_state:
+    st.session_state.chat_memory = []
 
-if 'chat_histories' not in st.session_state:
-    st.session_state.chat_histories = []
+# Initialize session id
+if "session_id" not in st.session_state:
+    st.session_state.session_id = str(uuid4())
 
-if 'chat_histories_to_save' not in st.session_state:
-    st.session_state.chat_histories_to_save = []
-
-if 'need_greetings' not in st.session_state:
-    st.session_state.need_greetings = True
-
-if 'previous_chat_id' not in st.session_state:
+if "previous_chat_id" not in st.session_state:
     st.session_state.previous_chat_id = None
 
-def remove_lucene_chars_cust(text: str) -> str:
-    """Remove Lucene special characters"""
-    special_chars = [
-        "+",
-        "-",
-        "&",
-        "|",
-        "!",
-        "(",
-        ")",
-        "{",
-        "}",
-        "[",
-        "]",
-        "^",
-        '"',
-        "~",
-        "*",
-        "?",
-        ":",
-        "\\",
-        "/"
-    ]
+# Store IP Client
+if "ip_address" not in st.session_state:
+    st.session_state.ip_address = get_public_ip()
 
-    for char in special_chars:
-        if char in text:
-            # if char == "/":
-            #     text = text.replace(char, "\\/")
-            # else :
-            text = text.replace(char, " ")
-    
-    return text.strip()
+# Saving user session
+if "user_session" not in st.session_state:
+    st.session_state.user_session = check_ip_already_exists(st.session_state.ip_address)
 
-@st.cache_resource
-def connect_to_google_sheets():
-    # Define the scope
-    scope = [
-        "https://spreadsheets.google.com/feeds",
-        "https://www.googleapis.com/auth/drive"
-    ]
-    # Authenticate credentials
-    credentials_dict = st.secrets["gspread_credential"]
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(credentials_dict, scope)
-    client = gspread.authorize(creds)
-    return client
+if "_temp_feedback" not in st.session_state:
+    st.session_state._temp_feedback = None
 
-# Save feedback to Google Sheets
-def save_feedback_to_google_sheets(name,sesssion_id, bidang, rating, feedback, chat_message):
-    # Connect to Google Sheets
-    client = connect_to_google_sheets()
-    sheet = client.open_by_url("https://docs.google.com/spreadsheets/d/17nV0tRr0sQLJlTD3BopuZFybSjL6R2C8kCCNYYzxdyg/edit?usp=sharing").sheet1# Open the Google Sheet by name
-    
-    chats = []
-    separator = "\n---\n"
+# Check if IP already exists
+if st.session_state.user_session is None:
+    _user_id = save_new_user(st.session_state.ip_address, st.session_state.session_id)
+    st.session_state.user_session = get_user_by_id(_user_id)
 
-    if len(chat_message) <= 1:
-        conversation = rf""
-    else:
-        for chat in chat_message[1:]:
-            role = chat["role"]
-            content = chat["content"]
-            chats.append(
-                f"{role}:{content}"
-            )
+st.session_state.user_conversations = get_conversations(st.session_state.user_session["id"])
 
-        conversation = f"""
-{separator.join([_chat for _chat in chats])}
+if "exist_conversation" not in st.session_state:
+    st.session_state.exist_conversation = None
+
+# Seesion for save conversation logic
+if "conversation_session_id" not in st.session_state:
+    st.session_state.conversation_session_id = str(uuid4())
+
+# Initialize chat histories
+if "chat_histories" not in st.session_state:
+    st.session_state.chat_histories = []
+
+if st.session_state.exist_conversation is not None:
+    # get chat history
+    st.session_state.chat_histories = get_chat_histories(st.session_state.exist_conversation)
+
+# Sidebar For Navigating to previous conversation
+with st.sidebar:    
+    st.markdown(
+        """
+# Chat OPA
 """
-    # print(conversation)
-    # Append the feedback
-    sheet.append_row([datetime.now(pytz.timezone("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M:%S"), sesssion_id, name, bidang, rating, feedback, conversation])
-
-
-# Load llm model using Groq
-# @st.cache_resource
-# def load_llm(KEY):
-#     return ChatGroq(
-#         model='llama-3.3-70b-versatile', #llama-3.1-70b-versatile, llama-3.1-8b-instant
-#         temperature=0,
-#         api_key=KEY
-#     )
-
-# llm = load_llm(st.secrets['GROQ_API_KEY'])
-
-@st.cache_resource
-def get_openrouter_llm(model: str = "meta-llama/llama-3.3-70b-instruct") -> ChatOpenAI:
-    return ChatOpenAI(
-        model_name=model,
-        openai_api_key=st.secrets["OPENROUTER_API_KEY"],
-        openai_api_base=st.secrets["OPENROUTER_BASE_URL"],
-        # Pass the provider preference as an extra parameter
-        extra_body={
-            "provider": {
-                "order": ["DeepInfra"], # "specify provider preference"
-                "allow_fallbacks" : True, # "Allow changing other providers, if the main provider is not available"
-                "sort" : "price" # "Sort the provider based on price"
-            }
-        }
     )
+     
+    if st.button("💬  **Percakapan Baru**", use_container_width=True, type="secondary"):
+        st.session_state.exist_conversation = None
+        st.session_state.previous_chat_id = None
+        st.session_state.conversation_saved = False
+        st.session_state.conversation_session_id = str(uuid4())
+        st.session_state.chat_histories = []
+        st.rerun()
 
-llm = get_openrouter_llm()
-
-
-# Integrate with Vector DB
-@st.cache_resource
-def create_vector_space():
-    embeddings = JinaEmbeddings(model_name="jina-embeddings-v3")
-    vector_index = QdrantVectorStore.from_existing_collection(
-        embedding=embeddings,
-        collection_name="OPA_Chatbot",
-        url=st.secrets["QDRANT_URL"],
-        api_key=st.secrets["QDRANT_API_KEY"],
-        prefer_grpc=True,
-        https=True
-    )
-    return vector_index
-
-vector_index = create_vector_space()
-
-def retrieve_context_by_vector(question):
-    question = remove_lucene_chars_cust(question)
-    return [el for el in vector_index.similarity_search(question, k=4)]
-
-def retrieve_context_by_vector_with_score_and_rerank(question: str, 
-                                                     k_initial: int = 7, 
-                                                     k_final: int = 3, 
-                                                     relevance_threshold: float = 0.8):
     """
-    Mengambil konteks dari vector store dengan dua tahap:
-    1. Mengambil hasil awal beserta skor relevansi menggunakan similarity_search_with_score.
-    2. Menyaring dokumen berdasarkan ambang skor, lalu melakukan reranking menggunakan JinaRerank.
-    
-    Parameter:
-    - question: Pertanyaan pengguna.
-    - k_initial: Jumlah dokumen awal yang diambil.
-    - k_final: Jumlah dokumen akhir yang dikembalikan setelah reranking.
-    - relevance_threshold: Ambang skor untuk menyaring dokumen.
-    
-    Fungsi ini mencetak nilai skor dari hasil awal, kemudian mencetak konten hasil reranking.
+    ---
     """
-    # Bersihkan pertanyaan
-    cleaned_question = remove_lucene_chars_cust(question)
-    
-    # Ambil hasil awal dengan skor relevansi
-    initial_results = vector_index.similarity_search_with_score(cleaned_question, k=k_initial)
-    
-    # print("=== Hasil retrieval awal ===")
-    # for idx, (doc, score) in enumerate(initial_results, start=1):
-    #     print(f"Dokumen {idx}: Score = {score}")
-    #     print(f"Content: {doc.page_content}\n")
-    
-    # Saring dokumen berdasarkan ambang skor
-    filtered_docs = [doc for (doc, score) in initial_results if score >= relevance_threshold]
-    
-    # Bungkus fungsi penyedia dokumen dalam RunnableLambda (sesuai ekspektasi ContextualCompressionRetriever)
-    base_retriever_runnable = RunnableLambda(lambda q: filtered_docs)
-    
-    # Buat reranker dengan model JinaRerank
-    compressor = JinaRerank(model="jina-reranker-v2-base-multilingual")
-    
-    # Buat pipeline retriever dengan reranking
-    compression_retriever = ContextualCompressionRetriever(
-        base_compressor=compressor,
-        base_retriever=base_retriever_runnable
-    )
-    
-    # Lakukan reranking
-    reranked_docs = compression_retriever.invoke(cleaned_question)
-    
-    # Ambil hanya k_final dokumen teratas
-    final_docs = reranked_docs[:k_final]
-    
-    # print("=== Hasil reranking ===")
-    # for idx, doc in enumerate(final_docs, start=1):
-    #     print(f"Reranked Dokumen {idx}:")
-    #     print(f"{doc.page_content}\n")
-    
-    return final_docs
 
-# Retrival knowledge
-def retriever(question: str):
-    unstructured_data = retrieve_context_by_vector_with_score_and_rerank(question)
+    st.write("**💬  Percakapan Terdahulu**")
 
-    documents = []
+    if len(st.session_state.user_conversations) > 0 :
+        st.markdown(
+    """
+    <style>
 
-    # Not Include section header because the page content already include the section header
-    
-    for doc in unstructured_data:
-        # sections = ""
+    div.stButton > button {
+        text-align: left !important;
+        display: block;
+    }
+
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+        for num, conversation in enumerate(st.session_state.user_conversations): # Bukan conversation histories melainkan session berbeda conversation!
+            label = conversation["message_user"]
+            if len(label) > 33:
+                label = label[:31] + " . . ."
+            if st.button(label, key = f"conv_btn_{num}", use_container_width=True, type="secondary"):
+                st.session_state.conversation_data = conversation
+                st.session_state.exist_conversation = conversation["session_id"]
+                st.session_state.conversation_saved = False
+                st.rerun()
         
-        # if "Header 1" in doc.metadata:
-        #     sections += f"Header 1 - {doc.metadata['Header 1']}\n"
-
-        # if "Header 2" in doc.metadata:
-        #     sections += f"Header 2 - {doc.metadata['Header 2']}\n"
-
-        # if "Header 3" in doc.metadata:
-        #     sections += f"Header 3 - {doc.metadata['Header 3']}\n"
-
-        # if "Header 4" in doc.metadata:
-        #     sections += f"Header 4 - {doc.metadata['Header 4']}\n"
-
-        # if "Header 5" in doc.metadata:
-        #     sections += f"Header 5 - {doc.metadata['Header 5']}\n"
-
-        # Section :
-        # {sections}
-        documents.append(
-            f"""
-Content :
-{doc.page_content.replace("text: ", "")}
-    """
-        )
-    nl = "\n---\n"
-    final_data = f"""
-
-{nl.join(documents)}
-
+# Feedback Form
+with st.expander("Chat OPA", icon=":material/priority_high:", expanded=False):
+    st.markdown(body=
 """
+Chat OPA adalah asisten virtual yang akan membantu anda terkait kultur kelapa sawit.
 
-    print(final_data)
-    return final_data
+**Aplikasi** ini sedang dalam pengembangan dan memerlukan **Feedback** dari pengguna.
 
-# Reference:
-# {new_line.join(references)}
-_template = """
-You are an assistant skilled in paraphrasing questions, ensuring they align with the current conversation context. Every time a new question appears, check the recent chat history to decide if it's on the same topic or if there's a new topic shift. 
-
-Guidelines:
-1. If the latest question is vague (e.g., "What is its capital?"), identify the most recent *explicitly mentioned topic* in the chat history and use it as context.
-2. When a new complete question introduces a different topic, assume it's a topic shift and use this new topic in the next responses until another shift occurs.
-3. Prioritize the most recent complete topic if multiple topics are discussed in history.
-
-**Examples:**
-
-Example 1:
-**Chat History:**
-- User: "Who is the president of Indonesia?"
-- AI: "The president of Indonesia is Joko Widodo."
-
-**Latest Question:**  
-User: "When did it gain independence?"
-
-**Paraphrased Question:**  
-"When did Indonesia gain independence?"
-
----
-
-Example 2 (Topic Shift):
-**Chat History:**
-- User: "Who is the president of Indonesia?"
-- AI: "The president of Indonesia is Joko Widodo."
-- User: "What is its capital?"
-- AI: "The capital of Indonesia is Jakarta."
-- User: "Who is the president of Vietnam?"
-- AI: "The president of Vietnam is Tran Dai Quang."
-
-**Latest Question:**  
-User: "What is its capital?"
-
-**Paraphrased Question:**  
-"What is the capital of Vietnam?"
-
----
-
-Example 3:
-**Chat History:**
-- User: "Who is the CEO of Apple?"
-- AI: "The CEO of Apple is Tim Cook."
-  
-**Latest Question:**  
-User: "How many employees does it have?"
-
-**Paraphrased Question:**  
-"How many employees does Apple have?"
-
----
-
-Example 4 (Topic Shift):
-**Chat History:**
-- User: "Who is the CEO of Apple?"
-- AI: "The CEO of Apple is Tim Cook."
-- User: "What is the companys revenue?"
-- AI: "Apple's revenue is $274.5 billion."
-
-**Latest Question:**  
-User: "What is his revenue?"
-
-**Paraphrased Question:**  
-"What is the revenue of CEO Apple?"
-
----
-
-Now, parafrase the latest question based on the recent topic or topic shift, using the latest chat history provided.
-But don't explain in  output. just give the parafrased question as output.
-
-**Chat History:**
-{chat_history}
-
-**Latest Question:**
-{question}
-
-**Paraphrased Question:**
+Silahkan coba untuk menanyakan sesuatu seputar kultur kelapa sawit. Setelah itu, mohon untuk mengisi *Feedback Form* dibawah ini.
 """
-
-CONDENSE_QUESTION_PROMPT = PromptTemplate.from_template(_template)
-
-# Chat history fromatter
-def _format_chat_history(chat_history: List[Tuple[str, str]]) -> List:
-    buffer = []
-    for human, ai in chat_history:
-        buffer.append(HumanMessage(content=human))
-        buffer.append(AIMessage(content=ai))
-    return buffer
-
-# Extract chat history if exists
-_search_query = RunnableBranch(
-    # If input includes chat_history, we condense it with the follow-up question
-    (
-        RunnableLambda(lambda x: bool(x.get("chat_history"))).with_config(
-            run_name="HasChatHistoryCheck"
-        ),  # Condense follow-up question and chat into a standalone_question
-        RunnablePassthrough.assign(
-            chat_history=lambda x: _format_chat_history(x["chat_history"])
-        )
-        | CONDENSE_QUESTION_PROMPT
-        | llm
-        | StrOutputParser(),
-    ),
-    # Else, we have no chat history, so just pass through the question
-    RunnableLambda(lambda x : x["question"]),
 )
 
-# Prompt to real prompt
-template = """Your name is OPA. You are a great, friendly and professional AI chat bot about product from the "Central of Oil Palm Research".
+    if st.button("Feedback Form", type="primary"):
+        user_id = st.session_state.user_session["id"]
+        session_id = st.session_state.session_id
 
-### User Question:
-{question}
+        send_feedback(user_id, session_id)
 
-### Context:
-{context}
+# Logo OPA
+col1, col2, col3 = st.columns([1, 2, 1])
 
-### Important Instructions:
-- Base your response only on the provided context. If the contexts provided do not match, say you don't know.
-- When answering questions, do not include a greeting or introduction unless explicitly requested.
+with col2:
+    st.image("./assets/logo_opa.png", width=300)
+    st.write("\n\n\n")
 
-Your Answer: """
-
-prompt = ChatPromptTemplate.from_template(template)
-
-
-# Creating chain for llm
-chain = (
-    RunnableParallel(
-        {
-            "context": _search_query | retriever,
-            "question": RunnablePassthrough(),
-        }
-    )
-    | prompt
-    | llm
-    | StrOutputParser()
-)
-
-def stream_response(response, delay=0.01):
-    for res in response:
-        yield res
-        time.sleep(delay)
-
-# @st.dialog("Berikan Feedback")
-# def send_feedback():
-#     with st.form(key="feedback_input", enter_to_submit=False, clear_on_submit=False):
-#         name = st.text_input("Nama")
-#         bidang = st.text_input("Bidang")
-#         feedback = st.text_area("Feedback")
-
-#         rating = [1, 2, 3, 4, 5]
-#         selected_rating = st.feedback(options="stars")
-
-#         # print("INI FEEDBACK: ", feedback)
-#         if st.form_submit_button("Submit"):
-#             # Save data to Google Sheets
-#             if selected_rating is not None:
-#                 # sesssion_id, name, bidang, rating, feedback, conversation
-#                 save_feedback_to_google_sheets(st.session_state.session_id, name, bidang, rating[selected_rating], feedback, st.session_state.messages)
-#                 st.success("Terimakasih atas umpan balik anda!")
-#             else:
-#                 st.error("Tolong berikan rating 🙏")
-            
-
-# with st.expander("OPA - Pakar Sawit", icon=":material/priority_high:", expanded=True):
-#     st.markdown(body=
-# """
-# PAKAR SAWIT adalah asisten virtual yang akan membantu anda terkait kultur kelapa sawit.
-
-# **Aplikasi** ini sedang dalam pengembangan dan memerlukan **Feedback** dari pengguna.
-
-# Silahkan coba untuk menanyakan sesuatu seputar kultur kelapa sawit. Setelah itu, mohon untuk mengisi *Feedback Form* dibawah ini.
-# """
-# )
-
-#     if st.button("Feedback Form", type="primary"):
-#         send_feedback()
-
-# st.image(image="./assets/Logo-RPN.png", width=240)
-st.header("(OPA) - Pakar Sawit", divider="gray")
+greetings = "Halo, saya OPA, Pakar Sawit Anda dari PT. RPN, Pusat Penelitian Sawit. Apakah ada yang bisa saya bantu?"
+st.chat_message(name="assistant", avatar= "./assets/OPA_avatar.jpeg").markdown(greetings)
 
 # Displaying all historical messages
-for message in st.session_state.messages:
-    st.chat_message(name = message['role'], avatar= "./assets/user_avatar.jpeg" if message["role"] == "user" else "./assets/OPA_avatar.jpeg").markdown(message['content'])
+for num, message in enumerate(st.session_state.chat_histories):
+    st.session_state.previous_chat_id = message["chat_id"]
+        
+    with st.chat_message(name= "user", avatar= "./assets/user_avatar.jpeg") :
+        st.markdown(message["message_user"])
 
-if st.session_state.need_greetings :
-    # greet users
-    greetings = "Selamat Datang, Saya adalah OPA, asisten virtual yang akan membantu anda terkait kultur kelapa sawit. Apakah ada yang bisa saya bantu?"
-    st.chat_message(name="assistant", avatar= "./assets/OPA_avatar.jpeg").markdown(greetings)
-    st.session_state.messages.append({'role' : 'assistant', 'content': greetings})
-    st.session_state.need_greetings = False
+    with st.chat_message(name= "assistant", avatar= "./assets/OPA_avatar.jpeg") :
+        st.markdown(message["message_assistant"])
 
+        if message["thumb_score"] is None:
+            selected_thumb_feedback = st.feedback (
+                options="thumbs",
+                key=f"fb_{num}",
+                on_change=save_thumb_chat_feedback,
+                args=[num, message["id"]]
+                )
+
+        else :
+            if st.session_state.chat_histories[num]["thumb_score"] == 1:
+               st.markdown("""
+<link href="https://fonts.googleapis.com/css2?family=Material+Icons" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Icons+Outlined" rel="stylesheet">
+
+<i class="material-icons" style="font-size:20px; color:#01b6a2;">thumb_up</i>
+<i class="material-icons-outlined" style="font-size:20px; color:#31333f99;">thumb_down</i>
+                           
+ """, unsafe_allow_html=True)
+            
+            else :
+                st.markdown("""
+<link href="https://fonts.googleapis.com/css2?family=Material+Icons" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Icons+Outlined" rel="stylesheet">
+
+<i class="material-icons-outlined" style="font-size:20px; color:#31333f99;">thumb_up</i>
+<i class="material-icons" style="font-size:20px; color:#fa6e00;">thumb_down</i>
+""", unsafe_allow_html=True)
 
 # Getting chat input from user
 prompt = st.chat_input()
 
-
 # Displaying chat prompt
 if prompt:
+    _chat_id = str(uuid4()) # new session chat_session
 
     # Displaying user chat prompt
     with st.chat_message(name="user", avatar="./assets/user_avatar.jpeg"):
@@ -500,29 +204,61 @@ if prompt:
 
     try :
         # Getting response from llm model
-        response = chain.stream({
-            "chat_history" : st.session_state.chat_histories, 
-            "question" : prompt
-        })
-        
-        # Saving user prompt to session state
-        st.session_state.messages.append({'role' : 'user', 'content': prompt})
+        response = chat_opa.get_response(
+            question = prompt,
+            chat_histories = st.session_state.chat_memory,
+        )
 
         # Displaying response
         with st.chat_message("assistant", avatar="./assets/OPA_avatar.jpeg"):
             response = st.write_stream(stream_response(response))
+            
+            chat_history_data = {
+                "chat_id" : _chat_id,
+                "chat_messages" : {
+                    "user" : prompt,
+                    "assistant" : response
+                },
+                "previous_chat_id" : st.session_state.previous_chat_id
+            }
+                
+            # save chat conversation
+            if st.session_state.exist_conversation is None:
+                
+                st.session_state.conversation_data = save_conversation(
+                    {
+                        "conversation_session_id" : st.session_state.conversation_session_id,
+                        "user_id" : st.session_state.user_session["id"]
+                    }
+                )
 
-        # Saving response to chat history in session state
-        st.session_state.messages.append({'role' : 'assistant', 'content': response})
+                st.session_state.exist_conversation = st.session_state.conversation_data["session_id"]
 
-        # Saving user and llm response to chat history
-        st.session_state.chat_histories.append((prompt, response))
+                        
+            # save chat history
+            _chat_temp = save_chat_history(chat_history_data, st.session_state.conversation_data)
+
+            if _chat_temp is not None:
+                st.session_state.chat_histories.append(_chat_temp)
+                del _chat_temp
+            
+            index_latest_chat = len(st.session_state.chat_histories) - 1
+            
+            if st.session_state.chat_histories[index_latest_chat]["thumb_score"] is None:
+                selected_thumb_feedback = st.feedback (
+                    options="thumbs",
+                    key=f"fb_{index_latest_chat}",
+                    on_change=save_thumb_chat_feedback,
+                    args=[index_latest_chat, st.session_state.chat_histories[index_latest_chat]["id"]]
+                    )
 
         # Just use 3 latest chat to chat history
         if len(st.session_state.chat_histories) > 3:
-            st.session_state.chat_histories = st.session_state.chat_histories[-3:]
-
-        st.write(st.session_state.chat_history_to_save)
+            st.session_state.chat_memory = [] = st.session_state.chat_histories[-3:]
+        else:
+            st.session_state.chat_memory = st.session_state.chat_histories
+        
+        st.rerun()
 
     except Exception as e:
-        st.error(e)   
+        st.error(e)
