@@ -584,7 +584,7 @@ with col2:
 # # st.image(image="./assets/Logo-RPN.png", width=240)
 # st.header("(OPA) - Pakar Sawit", divider="gray")
 
-greetings = "Halo, saya OPA, Pakar Sawit Anda dari PT. RPN, Pusat Penelitian Sawit. Apakah ada yang bisa saya bantu?"
+greetings = "Halo, saya OPA, Pakar Sawit Anda dari PT. RPN, Pusat Penelitian Kelapa Sawit. Apakah ada yang bisa saya bantu?"
 st.chat_message(name="assistant", avatar= "./assets/OPA_avatar.jpeg").markdown(greetings)
 
 # Displaying all historical messages
