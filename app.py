@@ -181,7 +181,7 @@ def get_openrouter_llm(model: str = "meta-llama/llama-3.3-70b-instruct") -> Chat
         # Pass the provider preference as an extra parameter
         extra_body={
             "provider": {
-                "order": ["Nebius"], # "specify provider preference"
+                "order": ["Groq"], # "specify provider preference"
                 "allow_fallbacks" : True, # "Allow changing other providers, if the main provider is not available"
                 "sort" : "price" # "Sort the provider based on price"
             }
@@ -457,40 +457,40 @@ def stream_response(response, delay=0.01):
         time.sleep(delay)
 
 
-# @st.dialog("Berikan Feedback")
-# def send_feedback():
-#     with st.form(key="feedback_input", enter_to_submit=False, clear_on_submit=False):
-#         name = st.text_input("Nama")
-#         bidang = st.text_input("Bidang")
-#         feedback = st.text_area("Feedback")
+@st.dialog("Berikan Feedback")
+def send_feedback():
+    with st.form(key="feedback_input", enter_to_submit=False, clear_on_submit=False):
+        name = st.text_input("Nama")
+        bidang = st.text_input("Bidang")
+        feedback = st.text_area("Feedback")
 
-#         rating = [1, 2, 3, 4, 5]
-#         selected_rating = st.feedback(options="stars")
+        rating = [1, 2, 3, 4, 5]
+        selected_rating = st.feedback(options="stars")
 
-#         # print("INI FEEDBACK: ", feedback)
-#         if st.form_submit_button("Submit"):
-#             # Save data to Google Sheets
-#             if selected_rating is not None:
-#                 # sesssion_id, name, bidang, rating, feedback, conversation
-#                 save_feedback_to_google_sheets(st.session_state.session_id, name, bidang, rating[selected_rating], feedback, st.session_state.messages)
-#                 st.success("Terimakasih atas umpan balik anda!")
-#             else:
-#                 st.error("Tolong berikan rating 🙏")
+        # print("INI FEEDBACK: ", feedback)
+        if st.form_submit_button("Submit"):
+            # Save data to Google Sheets
+            if selected_rating is not None:
+                # sesssion_id, name, bidang, rating, feedback, conversation
+                save_feedback_to_google_sheets(st.session_state.session_id, name, bidang, rating[selected_rating], feedback, st.session_state.messages)
+                st.success("Terimakasih atas umpan balik anda!")
+            else:
+                st.error("Tolong berikan rating 🙏")
             
 
-# with st.expander("OPA - Pakar Sawit", icon=":material/priority_high:", expanded=True):
-#     st.markdown(body=
-# """
-# PAKAR SAWIT adalah asisten virtual yang akan membantu anda terkait kultur kelapa sawit.
+with st.expander("Chat OPA", icon=":material/priority_high:", expanded=False):
+    st.markdown(body=
+"""
+Chat OPA adalah asisten virtual yang akan membantu anda terkait kultur kelapa sawit.
 
-# **Aplikasi** ini sedang dalam pengembangan dan memerlukan **Feedback** dari pengguna.
+**Aplikasi** ini sedang dalam pengembangan dan memerlukan **Feedback** dari pengguna.
 
-# Silahkan coba untuk menanyakan sesuatu seputar kultur kelapa sawit. Setelah itu, mohon untuk mengisi *Feedback Form* dibawah ini.
-# """
-# )
+Silahkan coba untuk menanyakan sesuatu seputar kultur kelapa sawit. Setelah itu, mohon untuk mengisi *Feedback Form* dibawah ini.
+"""
+)
 
-#     if st.button("Feedback Form", type="primary"):
-#         send_feedback()
+    if st.button("Feedback Form", type="primary"):
+        send_feedback()
 
 def dialog_on_change(chat_id, index):
     st.session_state.chat_histories_to_save[index]["feedback"] = st.session_state[f"text_area_{index}"]
