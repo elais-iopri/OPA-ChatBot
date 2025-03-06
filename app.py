@@ -169,7 +169,7 @@ def save_feedback_to_google_sheets(name,sesssion_id, bidang, rating, feedback, c
 """
     # print(conversation)
     # Append the feedback
-    sheet.append_row([datetime.now(pytz.timezone("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M:%S"), sesssion_id, name, bidang, rating, feedback, conversation])
+    sheet.append_row([datetime.datetime.now(pytz.timezone("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M:%S"), sesssion_id, name, bidang, rating, feedback, conversation])
 
 
 @st.cache_resource
