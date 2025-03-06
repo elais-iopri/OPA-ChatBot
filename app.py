@@ -196,7 +196,7 @@ def create_vector_space():
     embeddings = JinaEmbeddings(model_name="jina-embeddings-v3")
     vector_index = QdrantVectorStore.from_existing_collection(
         embedding=embeddings,
-        collection_name="KSI_ProductKnowledge23",
+        collection_name="KSI_saku_ProductKnowledge23",
         url=st.secrets["QDRANT_URL"],
         api_key=st.secrets["QDRANT_API_KEY"],
         prefer_grpc=True,
