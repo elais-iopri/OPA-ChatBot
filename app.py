@@ -1,10 +1,14 @@
 import streamlit as st
+import numpy as np
+import tensorflow as tf
+from PIL import Image
 from uuid import uuid4
-from src.utils import stream_response, get_public_ip
+from src.utils import stream_response, get_public_ip, preprocess_image
 from src.streamlit import (
     get_vector_index,
     get_open_router_llm,
     get_chat_opa,
+    get_cnn_model,
     send_feedback)
 from src.database import (
     check_ip_already_exists,
@@ -28,6 +32,8 @@ chat_opa = get_chat_opa(
     _openai = llm,
     _vector_index = vector_index,
 )
+
+cnn_model = get_cnn_model()
 
 if "conversation_saved" not in st.session_state:
     st.session_state.conversation_saved = False
@@ -79,6 +85,22 @@ if st.session_state.exist_conversation is not None:
     # get chat history
     st.session_state.chat_histories = get_chat_histories(st.session_state.exist_conversation)
 
+if "image_prediction" not in st.session_state:
+    st.session_state.image_prediction = None
+
+st.markdown(
+    """
+<style>
+section.stSidebar > div {
+    background-color: #01b6a2;
+    background-image: none;
+    color: #FFFFFF;
+}
+</style>
+""",
+    unsafe_allow_html=True,
+)
+
 # Sidebar For Navigating to previous conversation
 with st.sidebar:    
     st.markdown(
@@ -87,7 +109,7 @@ with st.sidebar:
 """
     )
      
-    if st.button("💬  **Percakapan Baru**", use_container_width=True, type="secondary"):
+    if st.button("💬  **Percakapan Baru**", use_container_width=True, type="primary"):
         st.session_state.exist_conversation = None
         st.session_state.previous_chat_id = None
         st.session_state.conversation_saved = False
@@ -99,7 +121,7 @@ with st.sidebar:
     ---
     """
 
-    st.write("**💬  Percakapan Terdahulu**")
+    st.write("## 💬 Percakapan Terdahulu")
 
     if len(st.session_state.user_conversations) > 0 :
         st.markdown(
@@ -118,8 +140,10 @@ with st.sidebar:
         for num, conversation in enumerate(st.session_state.user_conversations): # Bukan conversation histories melainkan session berbeda conversation!
             label = conversation["message_user"]
             if len(label) > 33:
-                label = label[:31] + " . . ."
-            if st.button(label, key = f"conv_btn_{num}", use_container_width=True, type="secondary"):
+                label = "**" + label[:31] + " . . ." + "**"
+            else:
+                label = "**" + label + "**"
+            if st.button(label, key = f"conv_btn_{num}", use_container_width=True, type="primary"):
                 st.session_state.conversation_data = conversation
                 st.session_state.exist_conversation = conversation["session_id"]
                 st.session_state.conversation_saved = False
@@ -192,21 +216,44 @@ for num, message in enumerate(st.session_state.chat_histories):
 """, unsafe_allow_html=True)
 
 # Getting chat input from user
-prompt = st.chat_input()
+prompt = st.chat_input(
+    accept_file=True,
+    file_type=["jpg", "jpeg", "png"]
+)
+
+if prompt and prompt.files:
+    # Open the uploaded image using PIL
+    image = Image.open(prompt.files[0])
+
+    # Preprocess the image for EfficientNetV2M
+    processed_image = preprocess_image(image)
+    
+    predictions = cnn_model.predict(processed_image)
+
+    decoded_predictions = tf.keras.applications.efficientnet_v2.decode_predictions(predictions, top=1)[0][0]
+
+    st.session_state.image_prediction = decoded_predictions[1]
+    st.write(st.session_state.image_prediction)
 
 # Displaying chat prompt
-if prompt:
+if prompt and prompt.text:
+    if not prompt.files :
+        st.session_state.image_prediction = None
+    
+    st.write(st.session_state.image_prediction, "OK")
+        
     _chat_id = str(uuid4()) # new session chat_session
 
     # Displaying user chat prompt
     with st.chat_message(name="user", avatar="./assets/user_avatar.jpeg"):
-        st.markdown(prompt)
+        st.markdown(prompt.text)
 
     try :
         # Getting response from llm model
         response = chat_opa.get_response(
-            question = prompt,
+            question = prompt.text,
             chat_histories = st.session_state.chat_memory,
+            image_prediction = st.session_state.image_prediction
         )
 
         # Displaying response
@@ -216,7 +263,7 @@ if prompt:
             chat_history_data = {
                 "chat_id" : _chat_id,
                 "chat_messages" : {
-                    "user" : prompt,
+                    "user" : prompt.text,
                     "assistant" : response
                 },
                 "previous_chat_id" : st.session_state.previous_chat_id
@@ -254,7 +301,7 @@ if prompt:
 
         # Just use 3 latest chat to chat history
         if len(st.session_state.chat_histories) > 3:
-            st.session_state.chat_memory = [] = st.session_state.chat_histories[-3:]
+            st.session_state.chat_memory = st.session_state.chat_histories[-3:]
         else:
             st.session_state.chat_memory = st.session_state.chat_histories
         

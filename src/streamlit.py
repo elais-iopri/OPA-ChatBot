@@ -1,5 +1,7 @@
+import os
 import streamlit as st
 import time
+import tensorflow as tf
 from langchain_openai import ChatOpenAI
 from langchain_qdrant import QdrantVectorStore
 from langchain_community.embeddings import JinaEmbeddings
@@ -40,7 +42,6 @@ def get_open_router_llm(model: str = "meta-llama/llama-3.3-70b-instruct") -> Cha
         }
     )
 
-
 @st.cache_resource
 def get_chat_opa(_openai: ChatOpenAI, _vector_index : QdrantVectorStore, reranker : Optional[JinaRerank] = None ) -> ChatOPA:
     return ChatOPA(
@@ -49,6 +50,11 @@ def get_chat_opa(_openai: ChatOpenAI, _vector_index : QdrantVectorStore, reranke
         reranker = reranker
     )
 
+@st.cache_resource
+def get_cnn_model():
+    model = tf.keras.applications.EfficientNetV2M(weights = "efficientnetv2-m.h5", input_shape=[224,224,3])
+    return model
+    
 @st.dialog("Berikan Feedback")
 def send_feedback(user_id : str, session_id: str):
     with st.form(key="feedback_input", enter_to_submit=False, clear_on_submit=False):

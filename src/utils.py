@@ -6,6 +6,20 @@ import platform
 import uuid
 import psutil
 import datetime
+import numpy as np
+
+# Define image preprocessing steps
+def preprocess_image(image):
+    # Resize image to the input size expected by your model (e.g., 480x480)
+    image = image.resize((224, 224))
+
+    # Convert image to numpy array and normalize (if required by the model)
+    image_array = np.array(image) / 255.0  # Normalize if your model expects it
+
+    # Reshape to match the model input shape
+    image_array = np.expand_dims(image_array, axis=0)
+
+    return image_array
 
 # Function to stream the response
 def stream_response(response, delay=0.01):

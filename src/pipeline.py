@@ -1,6 +1,6 @@
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_community.embeddings import JinaEmbeddings
 from src.utils import remove_lucene_chars_cust
 from langchain_community.document_compressors import JinaRerank
@@ -35,6 +35,9 @@ class ChatOPA:
 
         # create runnable branch to extract chat histories
         self._set_extract_chat_histories()
+
+        # create runnable branch to extract image_prediction
+        self._set_extract_image_prediction()
 
     
     # Extract chat history if exists
@@ -137,6 +140,50 @@ But don't explain in  output. just give the parafrased question as output.
             RunnableLambda(lambda x : x["question"]),
         )
 
+    def _set_extract_image_prediction(self):
+        INSRUCTION_PROMPT = """
+Given a model prediction from an uploaded image related to Oil Palm Disease (e.g., "Ganoderma") and a user-provided question, your task is to generate a fully standalone question that ensures clarity and completeness.
+
+Guidelines :
+- If the user's question refers to the model prediction, explicitly incorporate the predicted disease name while maintaining the original intent.
+- If the user's question does not relate to the model prediction, reformulate it into a clear and independent question without forcing a connection to the prediction.
+- Ensure that the reformulated question enhances contextual understanding while preserving the user's original inquiry.
+- Do not answer the question, just reformulate it if needed and otherwise return is as is
+
+**Example (1) : Question refers to prediction**
+- Image Prediction : Ganoderma
+- User Question : Bagaimana mengatasi ini?
+- Reformulated Question : Bagaimana mengatasi penyakit Ganoderma pada Kelapa sawit?
+
+**Example (2) : Question does not refers to the model prediction**
+- Image Prediction : Ganoderma
+- User Question : Apa nama latin dari kelapa sawit?
+- Reformulated Question : Apa nama latin dari kelapa sawit?
+"""
+        HUMAN_PROMPT = """
+Question : {question}
+Image Prediction : {image_prediction}
+"""
+        question_marker_prompt = ChatPromptTemplate.from_messages(
+            [
+                ("system", INSRUCTION_PROMPT),
+                ("human", HUMAN_PROMPT)
+            ]
+        )
+        self._extract_image_prediction = RunnableBranch(
+            # If input includes image_prediction, we condense it with the follow-up question
+            (
+                RunnableLambda(lambda x: bool(x.get("image_prediction"))).with_config(
+                    run_name="HasImagePredicitonCheck"
+                ),  # Condense follow-up question and chat into a standalone_question
+                question_marker_prompt
+                | self.openai
+                | StrOutputParser(),
+            ),
+            # Else, we have no chat history, so just pass through the question
+            RunnableLambda(lambda x : x["question"]),
+        )
+        pass
 
     # Chat history fromatter
     def _format_chat_histories(self, chat_histories: List[Dict]) -> List:
@@ -201,7 +248,6 @@ But don't explain in  output. just give the parafrased question as output.
         return final_docs
     
     def _retriever(self, question: str) -> str:
-        print(question)
         unstructured_data = self._retrieve_context_by_vector(question)
 
         documents = []
@@ -240,10 +286,10 @@ Content :
 {nl.join(documents)}
     """
 
-        print(final_data)
+        # print(final_data)
         return final_data
 
-    def get_response(self, question : str, chat_histories : Optional[List[Dict]] = None) :
+    def get_response(self, question : str, chat_histories : Optional[List[Dict]] = None, image_prediction : Optional[str] = None) :
         prompt_template = """
 Your name is OPA. You are a great, friendly and professional AI chat bot about product from the "Central of Oil Palm Research".
 
@@ -264,7 +310,14 @@ Your Answer:
         chain = (
             RunnableParallel(
                 {
-                    "context": self._extract_chat_histories | self._retriever,
+                    "question" : self._extract_image_prediction,
+                    "chat_histories" : lambda x : x["chat_histories"]
+                }
+            )
+            | self._extract_chat_histories
+            | RunnableParallel(
+                {
+                    "context": self._retriever,
                     "question": RunnablePassthrough(),
                 }
             )
@@ -273,9 +326,12 @@ Your Answer:
             | StrOutputParser()
         )
 
+        data = {
+            "image_prediction" : image_prediction,
+            "chat_histories" : chat_histories,
+            "question" : question
+        }
+
         return chain.stream(
-            {
-                "chat_histories" : chat_histories,
-                "question" : question
-            }
+           data
         )
